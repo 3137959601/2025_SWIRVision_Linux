@@ -20,7 +20,7 @@
    <string>MainWindow</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QGridLayout" name="gridLayout_22">
+   <layout class="QGridLayout" name="gridLayout_23">
     <item row="0" column="0">
      <widget class="QScrollArea" name="scrollArea">
       <property name="minimumSize">
@@ -51,7 +51,7 @@
      </widget>
     </item>
     <item row="0" column="1">
-     <layout class="QGridLayout" name="gridLayout_21">
+     <layout class="QGridLayout" name="gridLayout_22">
       <item row="0" column="0">
        <widget class="QGroupBox" name="groupBox">
         <property name="maximumSize">
@@ -402,12 +402,12 @@ background-color:rgb(85, 255, 255);</string>
          <property name="geometry">
           <rect>
            <x>0</x>
-           <y>-120</y>
+           <y>-354</y>
            <width>228</width>
-           <height>397</height>
+           <height>466</height>
           </rect>
          </property>
-         <layout class="QGridLayout" name="gridLayout_20">
+         <layout class="QGridLayout" name="gridLayout_21">
           <item row="0" column="0">
            <widget class="QGroupBox" name="groupBox_2">
             <property name="minimumSize">
@@ -1075,6 +1075,36 @@ QDoubleSpinBox::down-button {
             </layout>
            </widget>
           </item>
+          <item row="5" column="0">
+           <widget class="QGroupBox" name="groupBox_8">
+            <property name="title">
+             <string>flash固化</string>
+            </property>
+            <layout class="QGridLayout" name="gridLayout_20">
+             <item row="0" column="0">
+              <widget class="QPushButton" name="twoPointsFixPB">
+               <property name="text">
+                <string>固化两点</string>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="1">
+              <widget class="QPushButton" name="configFixpB">
+               <property name="text">
+                <string>固化配置</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="0">
+              <widget class="QPushButton" name="paramReadpB">
+               <property name="text">
+                <string>读出参数</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
          </layout>
         </widget>
        </widget>
@@ -1284,6 +1314,29 @@ QLCDNumber:hover {
       <item row="5" column="0">
        <layout class="QGridLayout" name="gridLayout_14">
         <item row="0" column="0">
+         <widget class="QLabel" name="label_2">
+          <property name="text">
+           <string>保存文件名称</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1" colspan="2">
+         <widget class="QTextEdit" name="savednameTE">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>20</height>
+           </size>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>200</width>
+            <height>30</height>
+           </size>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
          <widget class="QPushButton" name="FrameSavepB">
           <property name="maximumSize">
            <size>
@@ -1296,7 +1349,7 @@ QLCDNumber:hover {
           </property>
          </widget>
         </item>
-        <item row="0" column="1">
+        <item row="1" column="1">
          <widget class="QPushButton" name="DataStreamSavepB">
           <property name="maximumSize">
            <size>
@@ -1306,6 +1359,13 @@ QLCDNumber:hover {
           </property>
           <property name="text">
            <string>数据流保存</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="2">
+         <widget class="QToolButton" name="save_pathtB">
+          <property name="text">
+           <string>...</string>
           </property>
          </widget>
         </item>
@@ -1345,7 +1405,7 @@ QLCDNumber:hover {
   <buttongroup name="BP_buttonGroup"/>
   <buttongroup name="EH_buttonGroup"/>
   <buttongroup name="NUC_buttonGroup"/>
-  <buttongroup name="TEC_buttonGroup"/>
   <buttongroup name="AE_buttonGroup"/>
+  <buttongroup name="TEC_buttonGroup"/>
  </buttongroups>
 </ui>

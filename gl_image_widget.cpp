@@ -7,6 +7,109 @@
 
 #include "widget_image.h"  // 直接复用现有的共享 QImage 缓冲与互斥锁
 
+namespace {
+bool computeFullImageMeanDn(const QImage& img, double& meanDn)
+{
+    if (img.isNull() || img.width() <= 0 || img.height() <= 0) return false;
+
+    const int w = img.width();
+    const int h = img.height();
+    const qint64 pixelCount = qint64(w) * qint64(h);
+    if (pixelCount <= 0) return false;
+
+    if (img.format() == QImage::Format_Grayscale16) {
+        quint64 sum = 0;
+        const int stridePx = img.bytesPerLine() / int(sizeof(quint16));
+        const quint16* base = reinterpret_cast<const quint16*>(img.constBits());
+        for (int y = 0; y < h; ++y) {
+            const quint16* row = base + qint64(y) * stridePx;
+            for (int x = 0; x < w; ++x) sum += row[x];
+        }
+        meanDn = double(sum) / double(pixelCount);
+        return true;
+    }
+
+    if (img.format() == QImage::Format_Grayscale8) {
+        quint64 sum = 0;
+        const int stride = img.bytesPerLine();
+        const uchar* base = img.constBits();
+        for (int y = 0; y < h; ++y) {
+            const uchar* row = base + qint64(y) * stride;
+            for (int x = 0; x < w; ++x) sum += row[x];
+        }
+        meanDn = double(sum) / double(pixelCount);
+        return true;
+    }
+
+    quint64 sum = 0;
+    for (int y = 0; y < h; ++y) {
+        const QRgb* row = reinterpret_cast<const QRgb*>(img.constScanLine(y));
+        for (int x = 0; x < w; ++x) sum += qGray(row[x]);
+    }
+    meanDn = double(sum) / double(pixelCount);
+    return true;
+}
+
+bool computeFixedRoiMeanDn(const QImage& img, double& meanDn)
+{
+    // 固定ROI四点：
+    // (500,1000), (900,1000), (500,1400), (900,1400)
+    constexpr int kRoiX0 = 500;
+    constexpr int kRoiX1 = 900;
+    constexpr int kRoiY0 = 1000;
+    constexpr int kRoiY1 = 1400;
+
+    if (img.isNull() || img.width() <= 0 || img.height() <= 0) return false;
+
+    const int roiLeft   = std::min(kRoiX0, kRoiX1);
+    const int roiRight  = std::max(kRoiX0, kRoiX1);
+    const int roiTop    = std::min(kRoiY0, kRoiY1);
+    const int roiBottom = std::max(kRoiY0, kRoiY1);
+
+    // 裁剪到图像范围，右下边界按“包含端点”处理
+    const int x0 = std::max(0, roiLeft);
+    const int y0 = std::max(0, roiTop);
+    const int x1 = std::min(img.width()  - 1, roiRight);
+    const int y1 = std::min(img.height() - 1, roiBottom);
+    if (x0 > x1 || y0 > y1) return false;
+
+    const qint64 pixelCount = qint64(x1 - x0 + 1) * qint64(y1 - y0 + 1);
+    if (pixelCount <= 0) return false;
+
+    if (img.format() == QImage::Format_Grayscale16) {
+        quint64 sum = 0;
+        const int stridePx = img.bytesPerLine() / int(sizeof(quint16));
+        const quint16* base = reinterpret_cast<const quint16*>(img.constBits());
+        for (int y = y0; y <= y1; ++y) {
+            const quint16* row = base + qint64(y) * stridePx;
+            for (int x = x0; x <= x1; ++x) sum += row[x];
+        }
+        meanDn = double(sum) / double(pixelCount);
+        return true;
+    }
+
+    if (img.format() == QImage::Format_Grayscale8) {
+        quint64 sum = 0;
+        const int stride = img.bytesPerLine();
+        const uchar* base = img.constBits();
+        for (int y = y0; y <= y1; ++y) {
+            const uchar* row = base + qint64(y) * stride;
+            for (int x = x0; x <= x1; ++x) sum += row[x];
+        }
+        meanDn = double(sum) / double(pixelCount);
+        return true;
+    }
+
+    quint64 sum = 0;
+    for (int y = y0; y <= y1; ++y) {
+        const QRgb* row = reinterpret_cast<const QRgb*>(img.constScanLine(y));
+        for (int x = x0; x <= x1; ++x) sum += qGray(row[x]);
+    }
+    meanDn = double(sum) / double(pixelCount);
+    return true;
+}
+}
+
 GLImageWidget::GLImageWidget(QWidget* p) : QOpenGLWidget(p) {
     setMinimumSize(64, 64);
     setAutoFillBackground(false);
@@ -30,6 +133,10 @@ void GLImageWidget::setImageSpec(int w, int h, int bits) {
     if (w<=0 || h<=0) return;
     imgW = w; imgH = h; imgBits = (bits==8?8:16);
     specDirty = true;
+    hasFrameMeanAllDn = false;
+    lastFrameMeanAllDn = 0.0;
+    hasFrameMeanRoiDn = false;
+    lastFrameMeanRoiDn = 0.0;
 
     // ★ 关键：告诉布局系统我需要这么大，这样 QScrollArea 会按它来放
 //    setMinimumSize(imgW, imgH);
@@ -176,6 +283,10 @@ void GLImageWidget::paintGL() {
         QMutexLocker lk(&widget_image::s_imgMutex);
         const QImage& qimg = widget_image::image;
         if (!qimg.isNull()) {
+            hasFrameMeanAllDn = computeFullImageMeanDn(qimg, lastFrameMeanAllDn);
+            if (!hasFrameMeanAllDn) lastFrameMeanAllDn = 0.0;
+            hasFrameMeanRoiDn = computeFixedRoiMeanDn(qimg, lastFrameMeanRoiDn);
+            if (!hasFrameMeanRoiDn) lastFrameMeanRoiDn = 0.0;
             // 若尺寸不一致，跟随 QImage 重建纹理，避免黑屏
             if (qimg.width()!=imgW || qimg.height()!=imgH) {
                 imgW = qimg.width(); imgH = qimg.height();
@@ -189,6 +300,11 @@ void GLImageWidget::paintGL() {
                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, imgW, imgH,
                                 GL_RED, GL_UNSIGNED_BYTE,  qimg.constBits());
             }
+        } else {
+            hasFrameMeanAllDn = false;
+            lastFrameMeanAllDn = 0.0;
+            hasFrameMeanRoiDn = false;
+            lastFrameMeanRoiDn = 0.0;
         }
     }
 
@@ -213,7 +329,9 @@ void GLImageWidget::paintGL() {
             updateHoverInfo(localPos);
         } else {
             // 鼠标不在控件上：通知 UI 清空显示
-            emit hoverInfoChanged(0, 0, 0, false);
+            emit hoverInfoChanged(0, 0, 0, false,
+                                 lastFrameMeanAllDn, hasFrameMeanAllDn,
+                                 lastFrameMeanRoiDn, hasFrameMeanRoiDn);
         }
     }
     paintFpsCount++;
@@ -382,7 +500,9 @@ void GLImageWidget::mouseReleaseEvent(QMouseEvent* e) {
 void GLImageWidget::leaveEvent(QEvent* e) {
     Q_UNUSED(e);
     // 鼠标离开就不再显示浮标
-    emit hoverInfoChanged(0, 0, 0, false);
+    emit hoverInfoChanged(0, 0, 0, false,
+                         lastFrameMeanAllDn, hasFrameMeanAllDn,
+                         lastFrameMeanRoiDn, hasFrameMeanRoiDn);
     if (panning) { panning = false; unsetCursor(); }
 }
 
@@ -408,7 +528,12 @@ void GLImageWidget::updateHoverInfo(const QPoint& widgetPos)
 {
     lastMousePos = widgetPos;  // 逻辑像素；用于在屏上画浮标
 
-    if (imgW<=0 || imgH<=0 || viewW<=0 || viewH<=0) { emit hoverInfoChanged(0, 0, 0, false); return; }
+    if (imgW<=0 || imgH<=0 || viewW<=0 || viewH<=0) {
+        emit hoverInfoChanged(0, 0, 0, false,
+                             lastFrameMeanAllDn, hasFrameMeanAllDn,
+                             lastFrameMeanRoiDn, hasFrameMeanRoiDn);
+        return;
+    }
 
     // 1) 逻辑像素 → 设备像素（与 paintGL 里的 uViewSize 一致）
     const qreal dpr = devicePixelRatioF();
@@ -424,7 +549,9 @@ void GLImageWidget::updateHoverInfo(const QPoint& widgetPos)
 
     // 先做越界判断（浮点判定），越界就发 invalid
     if (fx < 0.0 || fy < 0.0 || fx >= double(imgW) || fy >= double(imgH)) {
-        emit hoverInfoChanged(0, 0, 0, false);
+        emit hoverInfoChanged(0, 0, 0, false,
+                             lastFrameMeanAllDn, hasFrameMeanAllDn,
+                             lastFrameMeanRoiDn, hasFrameMeanRoiDn);
         return;
     }
 
@@ -435,7 +562,12 @@ void GLImageWidget::updateHoverInfo(const QPoint& widgetPos)
     // 3) 读取像素值（从共享 QImage）
     QMutexLocker lk(&widget_image::s_imgMutex);
     const QImage& qimg = widget_image::image;
-    if (qimg.isNull() || qimg.width()!=imgW || qimg.height()!=imgH) {emit hoverInfoChanged(0, 0, 0, false); return; }
+    if (qimg.isNull() || qimg.width()!=imgW || qimg.height()!=imgH) {
+        emit hoverInfoChanged(0, 0, 0, false,
+                             lastFrameMeanAllDn, hasFrameMeanAllDn,
+                             lastFrameMeanRoiDn, hasFrameMeanRoiDn);
+        return;
+    }
 
     quint32 dn = 0;
     if (qimg.format() == QImage::Format_Grayscale16) {
@@ -448,10 +580,15 @@ void GLImageWidget::updateHoverInfo(const QPoint& widgetPos)
         dn = qimg.constScanLine(iy)[ix];     // 0..255
     } else {
         // 其他格式暂不支持悬浮读取
-        emit hoverInfoChanged(0, 0, 0, false); return;
+        emit hoverInfoChanged(0, 0, 0, false,
+                             lastFrameMeanAllDn, hasFrameMeanAllDn,
+                             lastFrameMeanRoiDn, hasFrameMeanRoiDn);
+        return;
     }
 
-    emit hoverInfoChanged(ix, iy, dn, true);   // 把结果发出去
+    emit hoverInfoChanged(ix, iy, dn, true,
+                         lastFrameMeanAllDn, hasFrameMeanAllDn,
+                         lastFrameMeanRoiDn, hasFrameMeanRoiDn);   // 把结果发出去
 }
 //确保鼠标离开scrollarea后小浮窗消失
 void GLImageWidget::ensureViewportFilter() {
@@ -476,7 +613,9 @@ bool GLImageWidget::eventFilter(QObject* watched, QEvent* ev) {
     if (watched == watchedViewport) {
         if (ev->type() == QEvent::Leave) {
             // 鼠标离开 ScrollArea 的可视区域
-            emit hoverInfoChanged(0, 0, 0, false);
+            emit hoverInfoChanged(0, 0, 0, false,
+                                 lastFrameMeanAllDn, hasFrameMeanAllDn,
+                                 lastFrameMeanRoiDn, hasFrameMeanRoiDn);
             update();                  // 立刻消失浮窗
         }
     }

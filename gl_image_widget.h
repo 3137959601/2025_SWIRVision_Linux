@@ -23,7 +23,9 @@ public slots:
     void repaintFromRaw16(const void* ptr, int w, int h);
 signals:
     // 悬浮像素信息：x, y, DN；valid=false 表示鼠标越界/离开
-    void hoverInfoChanged(int x, int y, quint32 dn, bool valid);
+    void hoverInfoChanged(int x, int y, quint32 dn, bool valid,
+                          double avgAllDn, bool avgAllValid,
+                          double avgRoiDn, bool avgRoiValid);
     void displayFpsChanged(double fps);     //显示帧率
 protected:
     void initializeGL() override;
@@ -83,4 +85,9 @@ private:
     QElapsedTimer paintFpsTimer;
     int paintFpsCount = 0;
     double lastDisplayFps = 0.0;
+
+    double lastFrameMeanAllDn = 0.0;
+    bool hasFrameMeanAllDn = false;
+    double lastFrameMeanRoiDn = 0.0;
+    bool hasFrameMeanRoiDn = false;
 };

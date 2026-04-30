@@ -15,8 +15,8 @@ public:
     explicit SerialWorker(QObject *parent = nullptr);
 
     ~SerialWorker();
-    QSerialPort *serialWorker;
-    QTimer *timer;
+    QSerialPort *serialWorker = nullptr;
+    QTimer *timer = nullptr;
     QMutex mutex;  // 互斥锁，用于保证线程安全
 
     QByteArray baRcvData;

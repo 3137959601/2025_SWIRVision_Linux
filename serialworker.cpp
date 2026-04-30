@@ -14,13 +14,21 @@ SerialWorker::~SerialWorker()
     if (timer) {
         timer->stop();
         delete timer;
+        timer = nullptr;
     }
-    delete serialWorker;
+    if (serialWorker) {
+        serialWorker->close();
+        delete serialWorker;
+        serialWorker = nullptr;
+    }
 
 }
 
 void SerialWorker::SerialPortInit(QString com_name)
 {
+    if (serialWorker) {
+        SerialClose();
+    }
     serialWorker = new QSerialPort;
     timer = new QTimer;
 
@@ -97,6 +105,11 @@ void SerialWorker::SerialClose()
         delete serialWorker; // 释放内存
         serialWorker = nullptr; // 防止悬空指针
         serial_bind_flag = false;
+    }
+    if (timer) {
+        timer->stop();
+        delete timer;
+        timer = nullptr;
     }
     //qDebug()<<"serial_bind_flag"<<serial_bind_flag;
 }
@@ -629,6 +642,7 @@ void SerialWorker::InstructionAnalyse(const std::vector<unsigned char> &content)
 }
 void SerialWorker::SerialPortReadyRead_Slot()
 {
+    if (!serialWorker || !timer) return;
 
     timer->start(200);//启动定时器，接收100毫秒数据（根据情况设定）
     baRcvData.append(serialWorker->readAll());

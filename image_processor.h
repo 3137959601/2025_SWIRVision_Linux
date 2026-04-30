@@ -69,6 +69,8 @@ public slots:
     void enableMedianFiltering(bool on) { MedianFilterEnabled = on; /*qDebug()<<"MedianFilter toggled"<<on<<this;*/}
     // =====直方图均衡算法 =====
     void enableEqualizeHist(bool on) { EqualizeHistEnabled = on; /*qDebug()<<"EqualizeHistEnabled toggled"<<on<<this;*/}
+    void setEqualizeHistThresholds(int upper, int lower);
+    void enableEqualizeHistDownsample(bool on) { EqualizeHistDownsampleEnabled.store(on, std::memory_order_release); }
     void equalizeHist16(cv::Mat1w& img16, int bitMaxEff);
     // 可选：统一设置并一次重建
     void setBpmParams(double gmin, double gmax, int dsnuAbsV, double dsnuKmadK,
@@ -154,6 +156,9 @@ private:
     // 统计量工具（鲁棒中位数 & MAD）
     static float medianOfMat32F(const cv::Mat& m);
     static float madOfMat32F(const cv::Mat& m, float med);
+    std::atomic_int  EqualizeHistUpperThreshold{75};
+    std::atomic_int  EqualizeHistLowerThreshold{15};
+    std::atomic_bool EqualizeHistDownsampleEnabled{false};
     //中值滤波
     bool MedianFilterEnabled = false;   // UI 开关
     //直方图均衡化

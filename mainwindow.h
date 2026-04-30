@@ -38,6 +38,7 @@
 #include <QScrollArea>
 #include <QRadioButton>
 #include <QLabel>
+#include <QSlider>
 
 namespace Ui {
 class MainWindow;
@@ -54,7 +55,7 @@ public:
     QThread *thread2;
     ImageProcessor *imgProc = nullptr;
     SerialWorker *serialworker;
-    QThread *serialThread;
+    QThread *serialThread = nullptr;
 //    QButtonGroup* bgGroup1;
 //    QButtonGroup* bgGroup2;
 
@@ -111,6 +112,14 @@ private slots:
     void on_collect_darkfield_pB_clicked();
 
     void on_DataStreamSavepB_clicked();
+
+    void on_save_pathtB_clicked();
+
+    void on_twoPointsFixPB_clicked();
+
+    void on_configFixpB_clicked();
+
+    void on_paramReadpB_clicked();
 
 private:
     Ui::MainWindow *ui;
@@ -169,6 +178,11 @@ private:
     QButtonGroup* histEqGroup = nullptr;
     QRadioButton* rbHistEq_On = nullptr;
     QRadioButton* rbHistEq_Off = nullptr;
+    QSlider*      sldHistUpper = nullptr;
+    QSlider*      sldHistLower = nullptr;
+    QLabel*       lblHistUpperValue = nullptr;
+    QLabel*       lblHistLowerValue = nullptr;
+    QCheckBox*    chkHistDownsample = nullptr;
     // ==== BPM 参数面板控件 ====
     QDockWidget   *dockBpm = nullptr;
     QDoubleSpinBox *sbGainMin = nullptr, *sbGainMax = nullptr, *sbDsnuKmad = nullptr;
@@ -179,6 +193,12 @@ private:
     QLabel* hoverLabel = nullptr;
     QLabel* srcFpsLabel = nullptr;      //图像处理帧率
     QLabel* dispFpsLabel = nullptr;     //图像显示实际帧率
+
+    // 统一保存配置（由 save_pathtB 设置）
+    QString m_imageSaveDir;
+    QString m_streamSaveDir;
+    QString m_imageSaveExt = "raw";
+    bool m_streamSaving = false;
 
 };
 

@@ -10,6 +10,7 @@
 #include <QPixmap>
 #include <QFile>
 #include <QElapsedTimer>
+#include <QInputDialog>
 
 #define AVERAGE_POLL_SIZE   10
 #define CHANNELS_NUM 8
@@ -49,6 +50,13 @@ MainWindow::MainWindow(QWidget *parent) :
 
 MainWindow::~MainWindow()
 {
+    if (serialThread) {
+        if (serial_bind_flag && serialworker) {
+            QMetaObject::invokeMethod(serialworker, "SerialClose", Qt::BlockingQueuedConnection);
+        }
+        serialThread->quit();
+        serialThread->wait();
+    }
     if (comboxDevice)
         delete comboxDevice;
     delete ui;
@@ -83,7 +91,7 @@ void MainWindow::initUI()
         "  letter-spacing: 1px;"
         "}"
     );
-    hoverLabel->setText(QStringLiteral("x=--  y=--  DN=--"));
+    hoverLabel->setText(QStringLiteral("x=--  y=--  DN=--  AVG_ALL=--  AVG_ROI=--"));
     statusBar()->addPermanentWidget(hoverLabel);
 //    srcFpsLabel  = new QLabel("Src --.- FPS", this);
 //    dispFpsLabel = new QLabel("Disp --.- FPS", this);
@@ -91,12 +99,18 @@ void MainWindow::initUI()
 //    statusBar()->addPermanentWidget(dispFpsLabel);
     // 连接 GL 的信号到标签
     connect(glView, &GLImageWidget::hoverInfoChanged,
-            this, [this](int x, int y, quint32 dn, bool valid){
+            this, [this](int x, int y, quint32 dn, bool valid,
+                         double avgAllDn, bool avgAllValid,
+                         double avgRoiDn, bool avgRoiValid){
+        const QString avgAllText = avgAllValid ? QString::number(avgAllDn, 'f', 2) : QStringLiteral("--");
+        const QString avgRoiText = avgRoiValid ? QString::number(avgRoiDn, 'f', 2) : QStringLiteral("--");
         if (valid) {
-            hoverLabel->setText(QString("x=%1  y=%2  DN=%3").arg(x).arg(y).arg(dn));
+            hoverLabel->setText(QString("x=%1  y=%2  DN=%3  AVG_ALL=%4  AVG_ROI=%5")
+                                .arg(x).arg(y).arg(dn).arg(avgAllText).arg(avgRoiText));
             hoverLabel->setStyleSheet("QLabel{background:rgba(0,0,0,200);color:#00FF90;padding:2px 10px;border-radius:8px;font:700 14px 'Consolas';}");
         } else {
-            hoverLabel->setText(QStringLiteral("x=-  y=-  DN=-"));
+            hoverLabel->setText(QString("x=-  y=-  DN=-  AVG_ALL=%1  AVG_ROI=%2")
+                                .arg(avgAllText).arg(avgRoiText));
             hoverLabel->setStyleSheet("QLabel{background:rgba(0,0,0,140);color:#AAAAAA;padding:2px 10px;border-radius:8px;font:700 14px 'Consolas';}");
         }
     });
@@ -129,6 +143,19 @@ void MainWindow::initUI()
             this, [=](int){ applySpec(); });
 
     ui->serialpB->setIcon(QIcon(":/icons/serial_close.png"));
+
+    // 读取保存配置（统一用于纯图像保存/数据流保存）
+    QSettings s("SWIRVision", "SWIRVision");
+    m_imageSaveDir  = s.value("save/imageDir",  QDir::currentPath()).toString();
+    m_streamSaveDir = m_imageSaveDir; // 数据流路径默认与图像路径一致
+    m_imageSaveExt  = s.value("save/imageExt",  QString("raw")).toString().toLower();
+    if (m_imageSaveExt != "raw" && m_imageSaveExt != "png" &&
+        m_imageSaveExt != "tif" && m_imageSaveExt != "bmp") {
+        m_imageSaveExt = "raw";
+    }
+    ui->save_pathtB->setToolTip(
+        QString("图像/数据流: %1\n图像格式: .%2")
+            .arg(m_imageSaveDir, m_imageSaveExt));
 }
 void MainWindow::initSerial()
 {
@@ -140,16 +167,22 @@ void MainWindow::initSerial()
     ui->serialCb->addItems(serialNamePort);
 
     serialworker = new SerialWorker;
+    serialThread = new QThread(this);
+    serialworker->moveToThread(serialThread);
+    connect(serialThread, &QThread::finished, serialworker, &QObject::deleteLater);
+    serialThread->start();
 
-    connect(this,&MainWindow::open_serial_signal,serialworker,&SerialWorker::SerialPortInit);
-    connect(this,&MainWindow::close_serial_signal,serialworker,&SerialWorker::SerialClose);
+    connect(this,&MainWindow::open_serial_signal,serialworker,&SerialWorker::SerialPortInit, Qt::BlockingQueuedConnection);
+    connect(this,&MainWindow::close_serial_signal,serialworker,&SerialWorker::SerialClose, Qt::BlockingQueuedConnection);
 
 //    connect(serialworker,&SerialWorker::recvDataSignal,this,&MainWindow::serial_recvDataSlot);
 
     //发送指令编码
-    connect(this,&MainWindow::InstructSettings_signal,serialworker,&SerialWorker::InstructionCode);
+    connect(this,&MainWindow::InstructSettings_signal,serialworker,&SerialWorker::InstructionCode, Qt::QueuedConnection);
     //发送指令
     connect(serialworker,&SerialWorker::instruction_send_signal,serialworker,&SerialWorker::SerialSendData_Slot);
+    //直接发送原始串口帧
+    connect(this,&MainWindow::serial_send_signal,serialworker,&SerialWorker::SerialSendData_Slot, Qt::QueuedConnection);
     //接收指令信号槽在串口类内部
     //功能分组
 
@@ -297,13 +330,50 @@ void MainWindow::initImageProcessing() {
     // ====== 6. 直方图均衡分组 ======
     grpHistEq = new QGroupBox(QStringLiteral("直方图均衡"), container);
     {
-        QHBoxLayout *hboxHistEq = new QHBoxLayout(grpHistEq);
+        QVBoxLayout *vboxHistEq = new QVBoxLayout(grpHistEq);
+        QHBoxLayout *hboxHistEq = new QHBoxLayout();
         rbHistEq_On  = new QRadioButton(QStringLiteral("开启"), grpHistEq);
         rbHistEq_Off = new QRadioButton(QStringLiteral("关闭"), grpHistEq);
         rbHistEq_Off->setChecked(true);
         hboxHistEq->addWidget(rbHistEq_On);
         hboxHistEq->addWidget(rbHistEq_Off);
         hboxHistEq->addStretch(1);
+        vboxHistEq->addLayout(hboxHistEq);
+
+        auto *formHistEq = new QFormLayout();
+        formHistEq->setLabelAlignment(Qt::AlignLeft);
+
+        sldHistUpper = new QSlider(Qt::Horizontal, grpHistEq);
+        sldHistLower = new QSlider(Qt::Horizontal, grpHistEq);
+        lblHistUpperValue = new QLabel(grpHistEq);
+        lblHistLowerValue = new QLabel(grpHistEq);
+        chkHistDownsample = new QCheckBox(QStringLiteral("4x4 下采样统计"), grpHistEq);
+
+        sldHistUpper->setRange(1, 10000);
+        sldHistUpper->setSingleStep(1);
+        sldHistUpper->setPageStep(10);
+        sldHistUpper->setValue(75);
+        sldHistLower->setRange(0, 9999);
+        sldHistLower->setSingleStep(1);
+        sldHistLower->setPageStep(10);
+        sldHistLower->setValue(15);
+
+        auto *upperBox = new QWidget(grpHistEq);
+        auto *upperLayout = new QHBoxLayout(upperBox);
+        upperLayout->setContentsMargins(0, 0, 0, 0);
+        upperLayout->addWidget(sldHistUpper, 1);
+        upperLayout->addWidget(lblHistUpperValue);
+
+        auto *lowerBox = new QWidget(grpHistEq);
+        auto *lowerLayout = new QHBoxLayout(lowerBox);
+        lowerLayout->setContentsMargins(0, 0, 0, 0);
+        lowerLayout->addWidget(sldHistLower, 1);
+        lowerLayout->addWidget(lblHistLowerValue);
+
+        formHistEq->addRow(QStringLiteral("上平台阈值"), upperBox);
+        formHistEq->addRow(QStringLiteral("下平台阈值"), lowerBox);
+        formHistEq->addRow(chkHistDownsample);
+        vboxHistEq->addLayout(formHistEq);
     }
     mainLayout->addWidget(grpHistEq);
 
@@ -397,6 +467,38 @@ void MainWindow::initImageProcessing() {
     connect(rbMedian_Off, &QRadioButton::clicked, this, &MainWindow::on_medianblur_radio_sel);
     connect(rbHistEq_On,  &QRadioButton::clicked, this, &MainWindow::on_EqualizeHist_sel);
     connect(rbHistEq_Off, &QRadioButton::clicked, this, &MainWindow::on_EqualizeHist_sel);
+    auto applyHistEqParams = [this]{
+        if (!imgProc || !sldHistUpper || !sldHistLower) return;
+        int upper = sldHistUpper->value();
+        int lower = sldHistLower->value();
+        if (upper <= lower) {
+            upper = lower + 1;
+            sldHistUpper->blockSignals(true);
+            sldHistUpper->setValue(upper);
+            sldHistUpper->blockSignals(false);
+        }
+        if (lblHistUpperValue) lblHistUpperValue->setText(QString::number(upper));
+        if (lblHistLowerValue) lblHistLowerValue->setText(QString::number(lower));
+        imgProc->setEqualizeHistThresholds(upper, lower);
+    };
+    connect(sldHistUpper, &QSlider::valueChanged, this, [=](int value){
+        if (value <= sldHistLower->value()) {
+            sldHistLower->blockSignals(true);
+            sldHistLower->setValue(value - 1);
+            sldHistLower->blockSignals(false);
+        }
+        applyHistEqParams();
+    });
+    connect(sldHistLower, &QSlider::valueChanged, this, [=](int value){
+        if (value >= sldHistUpper->value()) {
+            sldHistUpper->blockSignals(true);
+            sldHistUpper->setValue(value + 1);
+            sldHistUpper->blockSignals(false);
+        }
+        applyHistEqParams();
+    });
+    connect(chkHistDownsample, &QCheckBox::toggled, imgProc, &ImageProcessor::enableEqualizeHistDownsample);
+    applyHistEqParams();
 
     // ====== 8. 设置 DockWidget 内容 ======
     container->setLayout(mainLayout);
@@ -777,6 +879,7 @@ void MainWindow::on_pushButton_start_clicked()
         // 顺手把数据流保存关掉，防止文件一直开着
         transferThread::stopStreamSave();
         ui->DataStreamSavepB->setText(tr("保存数据流"));
+        m_streamSaving = false;
 
         ui->pushButton_start->setText("Start");
         ui->pushButton_retrieve->setEnabled(true);
@@ -1035,48 +1138,58 @@ void MainWindow::on_FrameSavepB_clicked()
         h = widget_image::image.height();
         bits = (widget_image::image.format() == QImage::Format_Grayscale16) ? 16 : 8;
     }
+    if (!imgProc) return;
+
+    if (m_imageSaveDir.isEmpty()) m_imageSaveDir = QDir::currentPath();
+    QDir().mkpath(m_imageSaveDir);
+
     const QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss");
-    const QString suggested = QString("frame_%1_%2x%3_%4bit.raw").arg(ts).arg(w).arg(h).arg(bits);
+    const QString defaultFileName = QString("frame_%1_%2x%3_%4bit.%5")
+                                        .arg(ts).arg(w).arg(h).arg(bits).arg(m_imageSaveExt);
 
-    QString path = QFileDialog::getSaveFileName(
-        this, tr("保存当前帧"),
-        suggested,
-        tr("RAW 数据 (*.raw);图像 (*.png *.tif *.bmp);所有文件 (*)"));
+    // 若 savednameTE 为空，沿用时间戳默认名；否则使用用户输入名。
+    QString fileName = ui->savednameTE->toPlainText().trimmed();
+    if (fileName.isEmpty()) fileName = defaultFileName;
 
-    if (!path.isEmpty() && imgProc) {
-        imgProc->saveFrame(path);
-    }
+    // Windows 文件名非法字符清洗，避免保存失败。
+    fileName.replace('\\', '_');
+    fileName.replace('/', '_');
+    fileName.replace(':', '_');
+    fileName.replace('*', '_');
+    fileName.replace('?', '_');
+    fileName.replace('"', '_');
+    fileName.replace('<', '_');
+    fileName.replace('>', '_');
+    fileName.replace('|', '_');
+
+    if (!fileName.contains('.')) fileName += ("." + m_imageSaveExt);
+
+    const QString path = QDir(m_imageSaveDir).filePath(fileName);
+
+    const bool ok = imgProc->saveFrame(path);
+    statusBar()->showMessage(ok ? QString("纯图像已保存：%1").arg(path)
+                                : QString("纯图像保存失败：%1").arg(path), 3000);
 }
 
 
 void MainWindow::on_DataStreamSavepB_clicked()
 {
-    // 静态变量，用来记住现在是不是正在保存
-    static bool s_saving = false;
+    if (!m_streamSaving) {
+        if (m_streamSaveDir.isEmpty()) m_streamSaveDir = QDir::currentPath();
+        QDir().mkpath(m_streamSaveDir);
 
-    if (!s_saving) {
-        // 第一次点，选个文件
         const QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss");
-        QString path = QFileDialog::getSaveFileName(
-            this,
-            tr("选择要保存的数据流文件"),
-            QString("datastream_%1.raw").arg(ts),
-            tr("RAW 文件 (*.raw);;所有文件 (*)")
-        );
-        if (path.isEmpty())
-            return;
+        const QString path = QDir(m_streamSaveDir).filePath(QString("datastream_%1.raw").arg(ts));
 
-        // 通知所有USB线程开始往这个文件里写
         transferThread::startStreamSave(path);
-
-        // 按钮文字改成“停止保存”，你UI里这个名字应该是 DataStreamSavepB
         ui->DataStreamSavepB->setText(tr("停止保存"));
-        s_saving = true;
+        m_streamSaving = true;
+        statusBar()->showMessage(QString("开始保存数据流：%1").arg(path), 3000);
     } else {
-        // 再次点击，停止
         transferThread::stopStreamSave();
         ui->DataStreamSavepB->setText(tr("保存数据流"));
-        s_saving = false;
+        m_streamSaving = false;
+        statusBar()->showMessage(QStringLiteral("数据流保存已停止"), 3000);
     }
 }
 
@@ -1188,4 +1301,73 @@ void MainWindow::on_collect_darkfield_pB_clicked()
 }
 
 
+
+
+void MainWindow::on_save_pathtB_clicked()
+{
+    // 1) 选择统一保存目录（图像与数据流共用）
+    const QString imgDir = QFileDialog::getExistingDirectory(
+        this,
+        tr("选择保存目录（图像/数据流）"),
+        m_imageSaveDir.isEmpty() ? QDir::currentPath() : m_imageSaveDir,
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+    if (imgDir.isEmpty()) return;
+
+    // 2) 选择纯图像保存格式
+    const QStringList fmtList = {"raw", "png", "tif", "bmp"};
+    int idx = fmtList.indexOf(m_imageSaveExt);
+    if (idx < 0) idx = 0;
+    bool ok = false;
+    const QString ext = QInputDialog::getItem(
+        this,
+        tr("选择纯图像保存格式"),
+        tr("图像后缀"),
+        fmtList,
+        idx,
+        false,
+        &ok).toLower();
+    if (!ok || ext.isEmpty()) return;
+
+    m_imageSaveDir = imgDir;
+    m_streamSaveDir = imgDir;
+    m_imageSaveExt = ext;
+
+    QSettings s("SWIRVision", "SWIRVision");
+    s.setValue("save/imageDir",  m_imageSaveDir);
+    s.setValue("save/imageExt",  m_imageSaveExt);
+
+    ui->save_pathtB->setToolTip(
+        QString("图像/数据流: %1\n图像格式: .%2")
+            .arg(m_imageSaveDir, m_imageSaveExt));
+    statusBar()->showMessage(
+        QString("保存配置已更新：图像/数据流[%1]，图像格式[.%2]")
+            .arg(m_imageSaveDir, m_imageSaveExt),
+        5000);
+
+}
+
+
+void MainWindow::on_twoPointsFixPB_clicked()
+{
+
+    emit serial_send_signal(QStringLiteral("EA010CFF00000B0A")); // 固化两点
+    statusBar()->showMessage(QStringLiteral("已发送：固化两点 (0x0C)"), 2000);
+}
+
+
+void MainWindow::on_configFixpB_clicked()
+{
+
+    emit serial_send_signal(QStringLiteral("EA010BFF00000A0A")); // 固化配置
+    statusBar()->showMessage(QStringLiteral("已发送：固化配置 (0x0B)"), 2000);
+}
+
+
+
+void MainWindow::on_paramReadpB_clicked()
+{
+
+    emit serial_send_signal(QStringLiteral("EA010DFF00000C0A")); // 读取两点及配置
+    statusBar()->showMessage(QStringLiteral("已发送：读取两点及配置 (0x0D)"), 2000);
+}
 

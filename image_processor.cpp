@@ -770,6 +770,18 @@ void ImageProcessor::setLinResidualDN(int v)     { QMutexLocker lk(&calibMutex);
 void ImageProcessor::setBlackThresh(int v)       { QMutexLocker lk(&calibMutex); blackThresh  = v;        }
 void ImageProcessor::setWhiteThresh(int v)       { QMutexLocker lk(&calibMutex); whiteThresh  = v;        }
 
+void ImageProcessor::setEqualizeHistThresholds(int upper, int lower)
+{
+    upper = std::clamp(upper, 1, 1000000);
+    lower = std::clamp(lower, 0, 1000000);
+    if (upper <= lower) {
+        upper = lower + 1;
+    }
+
+    EqualizeHistUpperThreshold.store(upper, std::memory_order_release);
+    EqualizeHistLowerThreshold.store(lower, std::memory_order_release);
+}
+
 void ImageProcessor::equalizeHist16(cv::Mat1w &img16, int bitMaxEff)
 {
     int bitMax = bitMaxEff;
@@ -777,7 +789,8 @@ void ImageProcessor::equalizeHist16(cv::Mat1w &img16, int bitMaxEff)
     if (bitMax > 65535) bitMax = 65535;
 
     const int bins = bitMax + 1;
-    const int totalPix = img16.rows * img16.cols;
+    const bool useDownsample = EqualizeHistDownsampleEnabled.load(std::memory_order_acquire);
+    const int sampleStep = useDownsample ? 4 : 1;
 
     // thread_local 复用直方图 / LUT，避免每帧 malloc
     static thread_local std::vector<uint32_t> hist;
@@ -785,40 +798,43 @@ void ImageProcessor::equalizeHist16(cv::Mat1w &img16, int bitMaxEff)
 
     hist.assign(bins, 0);
 
-    // 1) 统计直方图
-    for (int y = 0; y < img16.rows; ++y) {
+    // 1) 统计直方图；FPGA 对比模式下每 4 行、每 4 列抽 1 个像素。
+    uint64_t samplePix = 0;
+    for (int y = 0; y < img16.rows; y += sampleStep) {
         const uint16_t* row = img16.ptr<uint16_t>(y);
-        for (int x = 0; x < img16.cols; ++x) {
+        for (int x = 0; x < img16.cols; x += sampleStep) {
             uint16_t v = row[x];
             if (v > bitMax) v = (uint16_t)bitMax;
             hist[v]++;
+            ++samplePix;
         }
     }
+    if (samplePix == 0) return;
 
-    // 2) 计算 CDF，并找 cdf_min（第一个非零灰度）
-    uint64_t cdf = 0;
-    uint64_t cdf_min = 0;
-    bool foundMin = false;
+    // 2) 双平台阈值：上平台压峰值，下平台抬升非零低计数。
+    int upper = EqualizeHistUpperThreshold.load(std::memory_order_acquire);
+    int lower = EqualizeHistLowerThreshold.load(std::memory_order_acquire);
+    upper = std::clamp(upper, 1, 1000000);
+    lower = std::clamp(lower, 0, upper - 1);
 
-    lut.resize(bins);
-
+    uint64_t clippedTotal = 0;
     for (int i = 0; i < bins; ++i) {
-        cdf += hist[i];
-        if (!foundMin && hist[i] != 0) {
-            cdf_min = cdf;
-            foundMin = true;
+        if (hist[i] > (uint32_t)upper) {
+            hist[i] = (uint32_t)upper;
+        } else if (hist[i] > 0 && hist[i] < (uint32_t)lower) {
+            hist[i] = (uint32_t)lower;
         }
+        clippedTotal += hist[i];
     }
+    if (clippedTotal == 0) return;
 
-    const uint64_t denom = (uint64_t)totalPix - cdf_min;
-    if (denom == 0 || !foundMin) return;  // 图像近似全同值，不处理
-
-    // 3) 构造 LUT：lut[i] = round((cdf(i)-cdf_min)*bitMax/denom)
-    cdf = 0;
+    // 3) 构造 LUT：平台阈值后的累计分布映射到完整有效位宽。
+    uint64_t cdf = 0;
+    lut.resize(bins);
     for (int i = 0; i < bins; ++i) {
         cdf += hist[i];
         int mapped = (int)std::llround(
-            (double)(cdf - cdf_min) * bitMax / (double)denom
+            (double)cdf * bitMax / (double)clippedTotal
             );
         if (mapped < 0) mapped = 0;
         if (mapped > bitMax) mapped = bitMax;
@@ -972,6 +988,30 @@ static bool writeRawFromQImage(const QImage& img, const QString& filePath) {
     return true;
 }
 
+// 先用 OpenCV 按后缀编码到内存，再用 Qt 写文件，避免 Windows 下 Unicode 路径导致 imwrite 失败。
+static bool writeMatByImencode(const cv::Mat& mat, const QString& suffixLower, const QString& filePath) {
+    if (mat.empty()) return false;
+
+    QString ext = suffixLower;
+    if (ext == "jpg") ext = "jpeg";
+    if (ext == "tif") ext = "tiff";
+
+    std::vector<uchar> encoded;
+    bool ok = false;
+    try {
+        ok = cv::imencode(("." + ext).toStdString(), mat, encoded);
+    } catch (...) {
+        ok = false;
+    }
+    if (!ok || encoded.empty()) return false;
+
+    QFile f(filePath);
+    if (!f.open(QIODevice::WriteOnly)) return false;
+    const qint64 n = f.write(reinterpret_cast<const char*>(encoded.data()), qint64(encoded.size()));
+    f.close();
+    return n == qint64(encoded.size());
+}
+
 bool ImageProcessor::saveFrame(const QString& filePath) {
     QImage copy;
     {   // 线程安全地复制当前显示缓冲
@@ -985,7 +1025,8 @@ bool ImageProcessor::saveFrame(const QString& filePath) {
     QFileInfo finfo(filePath);
     if (!finfo.dir().exists()) QDir().mkpath(finfo.dir().absolutePath());
 
-    const bool toRaw = finfo.suffix().compare("raw", Qt::CaseInsensitive) == 0;
+    const QString suffixLower = finfo.suffix().toLower();
+    const bool toRaw = (suffixLower == "raw");
     bool ok = false;
     if (toRaw) {
         ok = writeRawFromQImage(copy, filePath);
@@ -995,11 +1036,26 @@ bool ImageProcessor::saveFrame(const QString& filePath) {
         return ok;
     }
     if (copy.format() == QImage::Format_Grayscale16) {
-        // 用 OpenCV 以 16U 原样写盘（PNG/TIFF）
+        // 16U 原样写盘（优先 PNG/TIFF），避免直接 imwrite(filePath.toStdString()) 的路径编码问题。
         cv::Mat m(copy.height(), copy.width(), CV_16UC1,
                   const_cast<uchar*>(copy.constBits()), copy.bytesPerLine());
         cv::Mat contiguous; m.copyTo(contiguous); // 确保连续
-        try { ok = cv::imwrite(filePath.toStdString(), contiguous); } catch(...) { ok = false; }
+
+        if (suffixLower == "png" || suffixLower == "tif" || suffixLower == "tiff") {
+            ok = writeMatByImencode(contiguous, suffixLower, filePath);
+            if (!ok && suffixLower == "png") {
+                // 回退：若当前环境缺少 OpenCV PNG 编码器，则退化为 Qt 保存。
+                ok = copy.save(filePath, "PNG");
+                if (!ok) {
+                    QImage gray8 = copy.convertToFormat(QImage::Format_Grayscale8);
+                    ok = gray8.save(filePath, "PNG");
+                }
+            }
+        } else {
+            // 其他格式维持原逻辑，失败时回退 Qt。
+            try { ok = cv::imwrite(filePath.toStdString(), contiguous); } catch(...) { ok = false; }
+            if (!ok) ok = copy.save(filePath);
+        }
     } else {
         ok = copy.save(filePath);
     }
