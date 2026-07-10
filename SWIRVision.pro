@@ -21,7 +21,9 @@ SOURCES += \
     main.cpp \
     mainwindow.cpp \
     serialworker.cpp \
+    telemetrydebugdialog.cpp \
     transfer_thread.cpp \
+    uartprotocol.cpp \
     widget_image.cpp
 
 HEADERS += \
@@ -34,7 +36,9 @@ HEADERS += \
     image_processor.h \
     mainwindow.h \
     serialworker.h \
+    telemetrydebugdialog.h \
     transfer_thread.h \
+    uartprotocol.h \
     widget_image.h
 
 FORMS += \

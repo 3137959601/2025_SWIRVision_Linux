@@ -1,4 +1,5 @@
 #include "serialworker.h"
+#include "uartprotocol.h"
 #include <QDebug>
 #include <QtGlobal>
 #include <cmath>
@@ -54,7 +55,8 @@ bool serial_bind_flag = false;
 SerialWorker::SerialWorker(QObject *parent)
     : QObject{parent}
 {
-
+    qRegisterMetaType<TelemetryFrame>("TelemetryFrame");
+    qRegisterMetaType<QList<TelemetryFrame>>("QList<TelemetryFrame>");
 }
 
 SerialWorker::~SerialWorker()
@@ -239,15 +241,20 @@ EA			01			XX			XXXXXX   	XX+XXXXXX    0A
 */
 void SerialWorker::InstructionCode(unsigned char flag,QList<float> SetVals)
 {
+    if (SetVals.isEmpty()) {
+        qWarning() << "串口指令缺少参数，命令码:" << Qt::hex << flag;
+        return;
+    }
+
     //计算异或校验
     unsigned char checksum = 0; // 存储校验和
     QString dataString;
     float value = 0.0;
 
-    unsigned short usValue;
-    unsigned char lowByte;      //第3个指令内容
-    unsigned char highByte;     //第2个指令内容
-    unsigned char firstByte;    //第1个指令内容，一般用于开关
+    unsigned short usValue = 0;
+    unsigned char lowByte = 0;      //第3个指令内容
+    unsigned char highByte = 0;     //第2个指令内容
+    unsigned char firstByte = 0;    //第1个指令内容，一般用于开关
     QString lowHexString;
     QString highHexString;
     QString firstHexString;
@@ -381,7 +388,7 @@ void SerialWorker::InstructionCode(unsigned char flag,QList<float> SetVals)
             usValue = static_cast<unsigned short>(static_cast<int>(value));
             firstByte = static_cast<unsigned char>(usValue&0xFF);
             break;
-        case 0x13:  //自动曝光
+        case 0x20:  //自动积分（与30W协议对齐，旧0x13改为读取积分）
             lowByte = 0x00;
             highByte = 0x00;
             value = SetVals[i];
@@ -390,7 +397,7 @@ void SerialWorker::InstructionCode(unsigned char flag,QList<float> SetVals)
             firstByte = static_cast<unsigned char>(usValue&0xFF);
             break;
         //case 0x14://测速指令，未显示在上位机中
-        case 0x15:  //探测器增益
+        case 0x2C:  //探测器增益（旧0x15改为读取状态）
             lowByte = 0x00;
             highByte = 0x00;
             value = SetVals[i];
@@ -399,8 +406,8 @@ void SerialWorker::InstructionCode(unsigned char flag,QList<float> SetVals)
             firstByte = static_cast<unsigned char>(usValue&0xFF);
             break;
         default:
-            qDebug() << "指令发送标志无法识别";
-            break;
+            qWarning() << "串口指令码无法识别:" << Qt::hex << flag;
+            return;
         }
 
     }
@@ -443,10 +450,35 @@ void SerialWorker::SerialSendData_Slot(QString buf)
     //qDebug()<<"开启sendSlot线程"<<QThread::currentThreadId();//查看槽函数在哪个线程运行
 }
 
+void SerialWorker::SerialSendBytes_Slot(const QByteArray &buf)
+{
+    if (serial_bind_flag && serialWorker)
+        serialWorker->write(buf);
+}
+
 //串口解析，包括校验指令是否传输正确，以及将正确的指令解析处理发送到主窗口中
 //同样，不同于BJUT上位机，进行了个性化修改
 void SerialWorker::SerialAnalyse(QByteArray &recvdata)
 {
+    int checksumErrors = 0;
+    const QList<TelemetryFrame> frames = UartProtocol::parseTelemetry(recvdata, &checksumErrors);
+    for (const TelemetryFrame &frame : frames) {
+        emit Int_LCDNumShow(float(frame.intTime) / 100.0f);
+        emit BoardTemp_LCDNumShow(float(UartProtocol::ds18b20Temperature(frame.boardTempRaw)));
+
+        std::vector<float> tecValues;
+        tecValues.push_back(float(frame.itecRaw) / 1000.0f);
+        tecValues.push_back(float(frame.vtecRaw) / 1000.0f);
+        tecValues.push_back(float(UartProtocol::tecVoltageToTemperature(double(frame.tmpActualRaw) / 1000.0)));
+        tecValues.push_back(float(UartProtocol::tecVoltageToTemperature(double(frame.tmpSetRaw) / 1000.0)));
+        emit TECTemp_LCDNumShow(tecValues);
+        emit Sharpness_LCDNumShow(frame.sharpness);
+    }
+    if (!frames.isEmpty() || checksumErrors > 0)
+        emit telemetryFramesReady(frames, checksumErrors);
+    return;
+
+#if 0 // 旧18/20字节解析保留作历史参考；400W当前只接收固定40字节长帧。
     //将strList转换为std::vector<unsigned char>后进行数据传递，这样使用的时候不需要每次用到就进行数据转换进行转换，时间更快些
     // 开始计时
     //auto start = std::chrono::high_resolution_clock::now();
@@ -555,6 +587,7 @@ void SerialWorker::SerialAnalyse(QByteArray &recvdata)
     // 打印运行时间
 //    qDebug() << "代码执行时间：" << elapsed.count() << "秒";
 
+ #endif
 }
 //异或校验
 bool SerialWorker::XorCorrect(const std::vector<unsigned char> &byteArray)

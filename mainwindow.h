@@ -43,6 +43,7 @@
 namespace Ui {
 class MainWindow;
 }
+class TelemetryDebugDialog;
 
 class MainWindow : public QMainWindow
 {
@@ -207,6 +208,7 @@ private:
     QString m_streamSaveDir;
     QString m_imageSaveExt = "raw";
     bool m_streamSaving = false;
+    TelemetryDebugDialog *m_telemetryDialog = nullptr;
 
 };
 

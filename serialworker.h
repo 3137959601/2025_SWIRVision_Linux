@@ -7,6 +7,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QMutex>
+#include "uartprotocol.h"
 
 class SerialWorker : public QObject
 {
@@ -38,6 +39,7 @@ public:
 
 public slots:
     void SerialSendData_Slot(QString buf);
+    void SerialSendBytes_Slot(const QByteArray &buf);
     void SerialPortReadyRead_Slot();
     void ADInstructionCode(QList<float> ADSetVals);
     void InstructionCode(unsigned char flag,QList<float> SetVals);
@@ -49,6 +51,7 @@ signals:
     void BoardTemp_LCDNumShow(float temp);
     void TECTemp_LCDNumShow(std::vector<float>temp);
     void Sharpness_LCDNumShow(int value);
+    void telemetryFramesReady(const QList<TelemetryFrame> &frames, int checksumErrors);
 
     void AD_instruction_signal(QString buf);
     void instruction_send_signal(QString buf);

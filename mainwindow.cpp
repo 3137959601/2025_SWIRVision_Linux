@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include "common/device.h"
+#include "telemetrydebugdialog.h"
 #include <QMessageBox>
 #include <QTime>
 #include <QtEndian>
@@ -11,6 +12,7 @@
 #include <QFile>
 #include <QElapsedTimer>
 #include <QInputDialog>
+#include <QMenuBar>
 
 #define AVERAGE_POLL_SIZE   10
 #define CHANNELS_NUM 8
@@ -296,6 +298,27 @@ void MainWindow::initSerial()
     connect(serialworker,&SerialWorker::BoardTemp_LCDNumShow,this,&MainWindow::BoardTemp_LCDNumShow_slot);
     connect(serialworker,&SerialWorker::TECTemp_LCDNumShow,this,&MainWindow::TECTemp_LCDNumShow_slot);
     connect(serialworker,&SerialWorker::Sharpness_LCDNumShow,this,&MainWindow::Sharpness_LCDNumShow_slot);
+
+    // 独立非模态串口调试窗口：串口线程负责解析，主线程只更新界面。
+    m_telemetryDialog = new TelemetryDebugDialog(this);
+    m_telemetryDialog->hide();
+    connect(m_telemetryDialog, &TelemetryDebugDialog::commandRequested,
+            serialworker, &SerialWorker::SerialSendBytes_Slot, Qt::QueuedConnection);
+    connect(serialworker, &SerialWorker::telemetryFramesReady, this,
+            [this](const QList<TelemetryFrame> &frames, int checksumErrors) {
+        if (!m_telemetryDialog) return;
+        m_telemetryDialog->addChecksumErrors(checksumErrors);
+        for (const TelemetryFrame &frame : frames)
+            m_telemetryDialog->handleFrame(frame);
+    });
+
+    auto *debugMenu = menuBar()->addMenu(QStringLiteral("调试"));
+    auto *telemetryAction = debugMenu->addAction(QStringLiteral("串口调试状态"));
+    connect(telemetryAction, &QAction::triggered, this, [this]() {
+        m_telemetryDialog->show();
+        m_telemetryDialog->raise();
+        m_telemetryDialog->activateWindow();
+    });
 }
 
 void MainWindow::initImageProcessing() {
@@ -1180,7 +1203,7 @@ void MainWindow::on_AE_sel()
         SetVals.append(0xFF);
     else if(enable==0)
         SetVals.append(0xF0);
-    emit InstructSettings_signal(0x13,SetVals);
+    emit InstructSettings_signal(0x20,SetVals);
 }
 
 void MainWindow::on_SGAIN_sel()
@@ -1192,7 +1215,7 @@ void MainWindow::on_SGAIN_sel()
         SetVals.append(0xFF);
     else if(enable==0)
         SetVals.append(0xF0);
-    emit InstructSettings_signal(0x15,SetVals);
+    emit InstructSettings_signal(0x2C,SetVals);
 }
 
 void MainWindow::on_FPGA_TwoPointCorrect_sel()
