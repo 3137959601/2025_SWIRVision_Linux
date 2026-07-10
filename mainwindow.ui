@@ -20,7 +20,7 @@
    <string>MainWindow</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QGridLayout" name="gridLayout_23">
+   <layout class="QGridLayout" name="gridLayout_27">
     <item row="0" column="0">
      <widget class="QScrollArea" name="scrollArea">
       <property name="minimumSize">
@@ -51,7 +51,7 @@
      </widget>
     </item>
     <item row="0" column="1">
-     <layout class="QGridLayout" name="gridLayout_22">
+     <layout class="QGridLayout" name="gridLayout_26">
       <item row="0" column="0">
        <widget class="QGroupBox" name="groupBox">
         <property name="maximumSize">
@@ -402,12 +402,12 @@ background-color:rgb(85, 255, 255);</string>
          <property name="geometry">
           <rect>
            <x>0</x>
-           <y>-354</y>
+           <y>-318</y>
            <width>228</width>
-           <height>466</height>
+           <height>580</height>
           </rect>
          </property>
-         <layout class="QGridLayout" name="gridLayout_21">
+         <layout class="QGridLayout" name="gridLayout_25">
           <item row="0" column="0">
            <widget class="QGroupBox" name="groupBox_2">
             <property name="minimumSize">
@@ -675,7 +675,7 @@ QDoubleSpinBox::down-button {
              </size>
             </property>
             <property name="title">
-             <string>TEC电压/V</string>
+             <string>TEC温度/℃</string>
             </property>
             <layout class="QGridLayout" name="gridLayout_6">
              <item row="2" column="0">
@@ -743,19 +743,22 @@ QDoubleSpinBox::down-button {
         }</string>
                </property>
                <property name="suffix">
-                <string>V</string>
+                <string>℃</string>
                </property>
                <property name="decimals">
                 <number>3</number>
                </property>
+               <property name="minimum">
+                <double>-36.930999999999997</double>
+               </property>
                <property name="maximum">
-                <double>2.500000000000000</double>
+                <double>84.778000000000006</double>
                </property>
                <property name="singleStep">
-                <double>0.001000000000000</double>
+                <double>0.100000000000000</double>
                </property>
                <property name="value">
-                <double>1.100000000000000</double>
+                <double>19.394000000000002</double>
                </property>
               </widget>
              </item>
@@ -879,7 +882,77 @@ QDoubleSpinBox::down-button {
             <property name="title">
              <string>硬件图像处理</string>
             </property>
-            <layout class="QGridLayout" name="gridLayout_17">
+            <layout class="QGridLayout" name="gridLayout_23">
+             <item row="5" column="0">
+              <layout class="QGridLayout" name="gridLayout_22">
+               <item row="0" column="0">
+                <layout class="QGridLayout" name="gridLayout_17">
+                 <item row="0" column="0">
+                  <widget class="QLabel" name="label_19">
+                   <property name="maximumSize">
+                    <size>
+                     <width>230</width>
+                     <height>16777215</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>十字线</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="1">
+                  <widget class="QRadioButton" name="Crosshair_On_rB">
+                   <property name="text">
+                    <string>开</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="2">
+                  <widget class="QRadioButton" name="Crosshair_Off_rB">
+                   <property name="text">
+                    <string>关</string>
+                   </property>
+                   <property name="checked">
+                    <bool>true</bool>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+               <item row="1" column="0">
+                <layout class="QGridLayout" name="gridLayout_21">
+                 <item row="0" column="1">
+                  <widget class="QToolButton" name="chUpShift_tB">
+                   <property name="text">
+                    <string>...</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="0">
+                  <widget class="QToolButton" name="chLeftShift_tB">
+                   <property name="text">
+                    <string>...</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="2">
+                  <widget class="QToolButton" name="chRightShift_tB">
+                   <property name="text">
+                    <string>...</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="2" column="1">
+                  <widget class="QToolButton" name="chDownShift_tB">
+                   <property name="text">
+                    <string>...</string>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+              </layout>
+             </item>
              <item row="0" column="0">
               <layout class="QGridLayout" name="gridLayout_16">
                <item row="0" column="0">
@@ -893,6 +966,80 @@ QDoubleSpinBox::down-button {
                 <widget class="QPushButton" name="collect_darkfield_pB">
                  <property name="text">
                   <string>采集亮场</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+             <item row="3" column="0">
+              <layout class="QGridLayout" name="gridLayout_13">
+               <item row="0" column="0">
+                <widget class="QLabel" name="label_16">
+                 <property name="maximumSize">
+                  <size>
+                   <width>230</width>
+                   <height>16777215</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>图像增强</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="0" column="1">
+                <widget class="QRadioButton" name="EH_ON_rB">
+                 <property name="text">
+                  <string>开</string>
+                 </property>
+                 <attribute name="buttonGroup">
+                  <string notr="true">EH_buttonGroup</string>
+                 </attribute>
+                </widget>
+               </item>
+               <item row="0" column="2">
+                <widget class="QRadioButton" name="EH_OFF_rB">
+                 <property name="text">
+                  <string>关</string>
+                 </property>
+                 <property name="checked">
+                  <bool>true</bool>
+                 </property>
+                 <attribute name="buttonGroup">
+                  <string notr="true">EH_buttonGroup</string>
+                 </attribute>
+                </widget>
+               </item>
+              </layout>
+             </item>
+             <item row="4" column="0">
+              <layout class="QGridLayout" name="gridLayout_15">
+               <item row="0" column="0">
+                <widget class="QLabel" name="label_17">
+                 <property name="maximumSize">
+                  <size>
+                   <width>230</width>
+                   <height>16777215</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>图像镜像</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="0" column="1">
+                <widget class="QRadioButton" name="MIR_On_rB">
+                 <property name="text">
+                  <string>开</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="0" column="2">
+                <widget class="QRadioButton" name="MIR_Off_rB">
+                 <property name="text">
+                  <string>关</string>
+                 </property>
+                 <property name="checked">
+                  <bool>true</bool>
                  </property>
                 </widget>
                </item>
@@ -998,10 +1145,10 @@ QDoubleSpinBox::down-button {
                </item>
               </layout>
              </item>
-             <item row="3" column="0">
-              <layout class="QGridLayout" name="gridLayout_13">
+             <item row="6" column="0">
+              <layout class="QGridLayout" name="gridLayout_24">
                <item row="0" column="0">
-                <widget class="QLabel" name="label_16">
+                <widget class="QLabel" name="label_20">
                  <property name="maximumSize">
                   <size>
                    <width>230</width>
@@ -1009,59 +1156,19 @@ QDoubleSpinBox::down-button {
                   </size>
                  </property>
                  <property name="text">
-                  <string>图像增强</string>
+                  <string>锐度返回</string>
                  </property>
                 </widget>
                </item>
                <item row="0" column="1">
-                <widget class="QRadioButton" name="EH_ON_rB">
-                 <property name="text">
-                  <string>开</string>
-                 </property>
-                 <attribute name="buttonGroup">
-                  <string notr="true">EH_buttonGroup</string>
-                 </attribute>
-                </widget>
-               </item>
-               <item row="0" column="2">
-                <widget class="QRadioButton" name="EH_OFF_rB">
-                 <property name="text">
-                  <string>关</string>
-                 </property>
-                 <property name="checked">
-                  <bool>true</bool>
-                 </property>
-                 <attribute name="buttonGroup">
-                  <string notr="true">EH_buttonGroup</string>
-                 </attribute>
-                </widget>
-               </item>
-              </layout>
-             </item>
-             <item row="4" column="0">
-              <layout class="QGridLayout" name="gridLayout_15">
-               <item row="0" column="0">
-                <widget class="QLabel" name="label_17">
-                 <property name="maximumSize">
-                  <size>
-                   <width>230</width>
-                   <height>16777215</height>
-                  </size>
-                 </property>
-                 <property name="text">
-                  <string>图像镜像</string>
-                 </property>
-                </widget>
-               </item>
-               <item row="0" column="1">
-                <widget class="QRadioButton" name="MIR_On_rB">
+                <widget class="QRadioButton" name="Sharpness_On_rB">
                  <property name="text">
                   <string>开</string>
                  </property>
                 </widget>
                </item>
                <item row="0" column="2">
-                <widget class="QRadioButton" name="MIR_Off_rB">
+                <widget class="QRadioButton" name="Sharpness_Off_rB">
                  <property name="text">
                   <string>关</string>
                  </property>
@@ -1075,7 +1182,7 @@ QDoubleSpinBox::down-button {
             </layout>
            </widget>
           </item>
-          <item row="5" column="0">
+          <item row="6" column="0">
            <widget class="QGroupBox" name="groupBox_8">
             <property name="title">
              <string>flash固化</string>
@@ -1111,15 +1218,8 @@ QDoubleSpinBox::down-button {
       </item>
       <item row="4" column="0">
        <layout class="QGridLayout" name="gridLayout_7">
-        <item row="0" column="0">
-         <widget class="QLabel" name="IntShowlB">
-          <property name="text">
-           <string>积分时间/ms</string>
-          </property>
-         </widget>
-        </item>
-        <item row="0" column="1">
-         <widget class="QLCDNumber" name="IntShow_lcd">
+        <item row="2" column="1">
+         <widget class="QLCDNumber" name="ITEC_lcd">
           <property name="styleSheet">
            <string notr="true">QLCDNumber {
     background-color: #2e2e2e; /* 背景色 */
@@ -1135,15 +1235,42 @@ QLCDNumber:hover {
 }
 </string>
           </property>
+          <property name="smallDecimalPoint">
+           <bool>false</bool>
+          </property>
           <property name="digitCount">
            <number>6</number>
           </property>
+          <property name="intValue" stdset="0">
+           <number>0</number>
+          </property>
          </widget>
         </item>
-        <item row="1" column="0">
-         <widget class="QLabel" name="label_9">
-          <property name="text">
-           <string>板间温度/℃</string>
+        <item row="3" column="1">
+         <widget class="QLCDNumber" name="VTEC_lcd">
+          <property name="styleSheet">
+           <string notr="true">QLCDNumber {
+    background-color: #2e2e2e; /* 背景色 */
+    color: #00FF00;           /* 字体颜色（绿色像LED灯） */
+    border: 2px solid #00FF00; /* 边框样式和颜色 */
+    border-radius: 10px;      /* 边框圆角 */
+    padding: 5px;             /* 内边距 */
+}
+
+QLCDNumber:hover {
+    background-color: #3e3e3e; /* 鼠标悬停时背景色 */
+    border: 2px solid #FFFFFF; /* 鼠标悬停时边框颜色 */
+}
+</string>
+          </property>
+          <property name="smallDecimalPoint">
+           <bool>false</bool>
+          </property>
+          <property name="digitCount">
+           <number>6</number>
+          </property>
+          <property name="intValue" stdset="0">
+           <number>0</number>
           </property>
          </widget>
         </item>
@@ -1169,6 +1296,49 @@ QLCDNumber:hover {
           </property>
          </widget>
         </item>
+        <item row="0" column="0">
+         <widget class="QLabel" name="IntShowlB">
+          <property name="text">
+           <string>积分时间/ms</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="label_9">
+          <property name="text">
+           <string>板间温度/℃</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QLCDNumber" name="IntShow_lcd">
+          <property name="styleSheet">
+           <string notr="true">QLCDNumber {
+    background-color: #2e2e2e; /* 背景色 */
+    color: #00FF00;           /* 字体颜色（绿色像LED灯） */
+    border: 2px solid #00FF00; /* 边框样式和颜色 */
+    border-radius: 10px;      /* 边框圆角 */
+    padding: 5px;             /* 内边距 */
+}
+
+QLCDNumber:hover {
+    background-color: #3e3e3e; /* 鼠标悬停时背景色 */
+    border: 2px solid #FFFFFF; /* 鼠标悬停时边框颜色 */
+}
+</string>
+          </property>
+          <property name="digitCount">
+           <number>6</number>
+          </property>
+         </widget>
+        </item>
+        <item row="4" column="0">
+         <widget class="QLabel" name="label_13">
+          <property name="text">
+           <string>TEC实际温度/℃</string>
+          </property>
+         </widget>
+        </item>
         <item row="2" column="0">
          <widget class="QLabel" name="label_11">
           <property name="text">
@@ -1176,8 +1346,8 @@ QLCDNumber:hover {
           </property>
          </widget>
         </item>
-        <item row="2" column="1">
-         <widget class="QLCDNumber" name="ITEC_lcd">
+        <item row="4" column="1">
+         <widget class="QLCDNumber" name="TECTACT_lcd">
           <property name="styleSheet">
            <string notr="true">QLCDNumber {
     background-color: #2e2e2e; /* 背景色 */
@@ -1211,43 +1381,8 @@ QLCDNumber:hover {
           </property>
          </widget>
         </item>
-        <item row="3" column="1">
-         <widget class="QLCDNumber" name="VTEC_lcd">
-          <property name="styleSheet">
-           <string notr="true">QLCDNumber {
-    background-color: #2e2e2e; /* 背景色 */
-    color: #00FF00;           /* 字体颜色（绿色像LED灯） */
-    border: 2px solid #00FF00; /* 边框样式和颜色 */
-    border-radius: 10px;      /* 边框圆角 */
-    padding: 5px;             /* 内边距 */
-}
-
-QLCDNumber:hover {
-    background-color: #3e3e3e; /* 鼠标悬停时背景色 */
-    border: 2px solid #FFFFFF; /* 鼠标悬停时边框颜色 */
-}
-</string>
-          </property>
-          <property name="smallDecimalPoint">
-           <bool>false</bool>
-          </property>
-          <property name="digitCount">
-           <number>6</number>
-          </property>
-          <property name="intValue" stdset="0">
-           <number>0</number>
-          </property>
-         </widget>
-        </item>
-        <item row="4" column="0">
-         <widget class="QLabel" name="label_13">
-          <property name="text">
-           <string>TEC实际电压V</string>
-          </property>
-         </widget>
-        </item>
-        <item row="4" column="1">
-         <widget class="QLCDNumber" name="TECTACT_lcd">
+        <item row="5" column="1">
+         <widget class="QLCDNumber" name="TECTSET_lcd">
           <property name="styleSheet">
            <string notr="true">QLCDNumber {
     background-color: #2e2e2e; /* 背景色 */
@@ -1277,12 +1412,19 @@ QLCDNumber:hover {
         <item row="5" column="0">
          <widget class="QLabel" name="label_14">
           <property name="text">
-           <string>TEC设置电压/V</string>
+           <string>TEC设置温度/℃</string>
           </property>
          </widget>
         </item>
-        <item row="5" column="1">
-         <widget class="QLCDNumber" name="TECTSET_lcd">
+        <item row="6" column="0">
+         <widget class="QLabel" name="label_21">
+          <property name="text">
+           <string>锐度值</string>
+          </property>
+         </widget>
+        </item>
+        <item row="6" column="1">
+         <widget class="QLCDNumber" name="SharpnessValue_lcd">
           <property name="styleSheet">
            <string notr="true">QLCDNumber {
     background-color: #2e2e2e; /* 背景色 */
@@ -1402,10 +1544,10 @@ QLCDNumber:hover {
  <resources/>
  <connections/>
  <buttongroups>
-  <buttongroup name="BP_buttonGroup"/>
-  <buttongroup name="EH_buttonGroup"/>
   <buttongroup name="NUC_buttonGroup"/>
   <buttongroup name="AE_buttonGroup"/>
+  <buttongroup name="BP_buttonGroup"/>
   <buttongroup name="TEC_buttonGroup"/>
+  <buttongroup name="EH_buttonGroup"/>
  </buttongroups>
 </ui>

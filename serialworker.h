@@ -25,7 +25,7 @@ public:
     void SerialOpen();
 
     void SerialClose();
-    void SerialAnalyse(const QByteArray &data);
+    void SerialAnalyse(QByteArray &data);
 
     bool XorCorrect(const std::vector<unsigned char>& byteArray);
     void InstructionAnalyse(const std::vector<unsigned char>& content);
@@ -48,6 +48,7 @@ signals:
     void Int_LCDNumShow(float time);
     void BoardTemp_LCDNumShow(float temp);
     void TECTemp_LCDNumShow(std::vector<float>temp);
+    void Sharpness_LCDNumShow(int value);
 
     void AD_instruction_signal(QString buf);
     void instruction_send_signal(QString buf);

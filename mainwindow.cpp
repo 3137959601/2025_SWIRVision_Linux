@@ -144,6 +144,37 @@ void MainWindow::initUI()
 
     ui->serialpB->setIcon(QIcon(":/icons/serial_close.png"));
 
+    const QSize arrowSize(24, 24);
+    ui->chUpShift_tB->setIcon(QIcon(":/icons/up_arrow.png"));
+    ui->chDownShift_tB->setIcon(QIcon(":/icons/down_arrow.png"));
+    ui->chLeftShift_tB->setIcon(QIcon(":/icons/left_arrow.png"));
+    ui->chRightShift_tB->setIcon(QIcon(":/icons/right_arrow.png"));
+    ui->chUpShift_tB->setIconSize(arrowSize);
+    ui->chDownShift_tB->setIconSize(arrowSize);
+    ui->chLeftShift_tB->setIconSize(arrowSize);
+    ui->chRightShift_tB->setIconSize(arrowSize);
+    ui->chUpShift_tB->setText(QString());
+    ui->chDownShift_tB->setText(QString());
+    ui->chLeftShift_tB->setText(QString());
+    ui->chRightShift_tB->setText(QString());
+    ui->chUpShift_tB->setAutoRaise(true);
+    ui->chDownShift_tB->setAutoRaise(true);
+    ui->chLeftShift_tB->setAutoRaise(true);
+    ui->chRightShift_tB->setAutoRaise(true);
+    ui->chUpShift_tB->setAutoRepeat(true);
+    ui->chDownShift_tB->setAutoRepeat(true);
+    ui->chLeftShift_tB->setAutoRepeat(true);
+    ui->chRightShift_tB->setAutoRepeat(true);
+    //按住会每 100ms 发送一次（按下后 300ms 开始连发）
+    ui->chUpShift_tB->setAutoRepeatDelay(300);
+    ui->chDownShift_tB->setAutoRepeatDelay(300);
+    ui->chLeftShift_tB->setAutoRepeatDelay(300);
+    ui->chRightShift_tB->setAutoRepeatDelay(300);
+    ui->chUpShift_tB->setAutoRepeatInterval(100);
+    ui->chDownShift_tB->setAutoRepeatInterval(100);
+    ui->chLeftShift_tB->setAutoRepeatInterval(100);
+    ui->chRightShift_tB->setAutoRepeatInterval(100);
+
     // 读取保存配置（统一用于纯图像保存/数据流保存）
     QSettings s("SWIRVision", "SWIRVision");
     m_imageSaveDir  = s.value("save/imageDir",  QDir::currentPath()).toString();
@@ -210,10 +241,61 @@ void MainWindow::initSerial()
     //增强
     connect(ui->EH_ON_rB,  &QRadioButton::clicked, this, &MainWindow::on_FPGA_Enhance_sel);
     connect(ui->EH_OFF_rB, &QRadioButton::clicked, this, &MainWindow::on_FPGA_Enhance_sel);
+    // Independent radio groups
+    ui->MIR_On_rB->setAutoExclusive(false);
+    ui->MIR_Off_rB->setAutoExclusive(false);
+    ui->Crosshair_On_rB->setAutoExclusive(false);
+    ui->Crosshair_Off_rB->setAutoExclusive(false);
+    ui->Sharpness_On_rB->setAutoExclusive(false);
+    ui->Sharpness_Off_rB->setAutoExclusive(false);
+
+    auto *mirrorGroup = new QButtonGroup(this);
+    mirrorGroup->setExclusive(true);
+    mirrorGroup->addButton(ui->MIR_On_rB);
+    mirrorGroup->addButton(ui->MIR_Off_rB);
+    ui->MIR_On_rB->setChecked(true);
+
+    auto *crosshairGroup = new QButtonGroup(this);
+    crosshairGroup->setExclusive(true);
+    crosshairGroup->addButton(ui->Crosshair_On_rB);
+    crosshairGroup->addButton(ui->Crosshair_Off_rB);
+    ui->Crosshair_Off_rB->setChecked(true);
+
+    auto *sharpnessGroup = new QButtonGroup(this);
+    sharpnessGroup->setExclusive(true);
+    sharpnessGroup->addButton(ui->Sharpness_On_rB);
+    sharpnessGroup->addButton(ui->Sharpness_Off_rB);
+    ui->Sharpness_Off_rB->setChecked(true);
+    // Crosshair and sharpness return
+    connect(ui->Crosshair_On_rB, &QRadioButton::clicked, this, [this](bool checked){
+        if (checked) emit serial_send_signal(QStringLiteral("EA0121FF0000200A"));
+    });
+    connect(ui->Crosshair_Off_rB, &QRadioButton::clicked, this, [this](bool checked){
+        if (checked) emit serial_send_signal(QStringLiteral("EA0121F00000110A"));
+    });
+    connect(ui->Sharpness_On_rB, &QRadioButton::clicked, this, [this](bool checked){
+        if (checked) emit serial_send_signal(QStringLiteral("EA0131FF0000300A"));
+    });
+    connect(ui->Sharpness_Off_rB, &QRadioButton::clicked, this, [this](bool checked){
+        if (checked) emit serial_send_signal(QStringLiteral("EA0131F00000210A"));
+    });
+    connect(ui->chUpShift_tB, &QToolButton::clicked, this, [this]{
+        emit serial_send_signal(QStringLiteral("EA0123FF0000220A"));
+    });
+    connect(ui->chDownShift_tB, &QToolButton::clicked, this, [this]{
+        emit serial_send_signal(QStringLiteral("EA0123F00000130A"));
+    });
+    connect(ui->chLeftShift_tB, &QToolButton::clicked, this, [this]{
+        emit serial_send_signal(QStringLiteral("EA0122F00000120A"));
+    });
+    connect(ui->chRightShift_tB, &QToolButton::clicked, this, [this]{
+        emit serial_send_signal(QStringLiteral("EA0122FF0000210A"));
+    });
     //LCD显示
     connect(serialworker,&SerialWorker::Int_LCDNumShow,this,&MainWindow::Int_LCDNumShow_slot);
     connect(serialworker,&SerialWorker::BoardTemp_LCDNumShow,this,&MainWindow::BoardTemp_LCDNumShow_slot);
     connect(serialworker,&SerialWorker::TECTemp_LCDNumShow,this,&MainWindow::TECTemp_LCDNumShow_slot);
+    connect(serialworker,&SerialWorker::Sharpness_LCDNumShow,this,&MainWindow::Sharpness_LCDNumShow_slot);
 }
 
 void MainWindow::initImageProcessing() {
@@ -255,6 +337,28 @@ void MainWindow::initImageProcessing() {
     vboxNUC->addLayout(hboxButtons);
     vboxNUC->addLayout(hboxRadio);
     mainLayout->addWidget(grpNUC);
+
+    // ====== 3.2 最暗场补偿校正分组 ======
+    grpDarkestOffset = new QGroupBox(QStringLiteral("最暗场补偿校正"), container);
+    QVBoxLayout *vboxDarkestOffset = new QVBoxLayout(grpDarkestOffset);
+
+    btnDarkestRef = new QPushButton(QStringLiteral("采集最暗场参考"), grpDarkestOffset);
+    rbDarkestOffset_On  = new QRadioButton(QStringLiteral("开启"), grpDarkestOffset);
+    rbDarkestOffset_Off = new QRadioButton(QStringLiteral("关闭"), grpDarkestOffset);
+    rbDarkestOffset_Off->setChecked(true);
+
+    QHBoxLayout *hboxDarkestButtons = new QHBoxLayout();
+    hboxDarkestButtons->addWidget(btnDarkestRef);
+    hboxDarkestButtons->addStretch(1);
+
+    QHBoxLayout *hboxDarkestRadio = new QHBoxLayout();
+    hboxDarkestRadio->addWidget(rbDarkestOffset_On);
+    hboxDarkestRadio->addWidget(rbDarkestOffset_Off);
+    hboxDarkestRadio->addStretch(1);
+
+    vboxDarkestOffset->addLayout(hboxDarkestButtons);
+    vboxDarkestOffset->addLayout(hboxDarkestRadio);
+    mainLayout->addWidget(grpDarkestOffset);
 
     // ====== 4. BPM 参数部分（BPM 组移动到 NUC 之后，并新增“保存/加载 BPM”） ======
     QGroupBox *grpBPM = new QGroupBox(QStringLiteral("盲元去除"), container);
@@ -390,6 +494,9 @@ void MainWindow::initImageProcessing() {
     connect(btnLowRef,     &QPushButton::clicked, imgProc, &ImageProcessor::startCaptureLow);
     connect(btnHighRef,    &QPushButton::clicked, imgProc, &ImageProcessor::startCaptureHigh);
     connect(btnClearCalib, &QPushButton::clicked, imgProc, &ImageProcessor::clearCalibration);
+    connect(btnDarkestRef, &QPushButton::clicked, imgProc, &ImageProcessor::startCaptureDarkest);
+    connect(rbDarkestOffset_On,  &QRadioButton::clicked, this, &MainWindow::on_DarkestOffsetCorrect_sel);
+    connect(rbDarkestOffset_Off, &QRadioButton::clicked, this, &MainWindow::on_DarkestOffsetCorrect_sel);
 
     // 盲元去除
     connect(rbBlindOn,  &QRadioButton::clicked, this, &MainWindow::on_BlindPointDetect_sel);
@@ -1026,6 +1133,13 @@ void MainWindow::on_TwoPointCorrect_sel()
     imgProc->enableTwoPoint(enable);
 }
 
+void MainWindow::on_DarkestOffsetCorrect_sel()
+{
+    if (!imgProc || !rbDarkestOffset_On || !rbDarkestOffset_Off) return;
+    const bool enable = rbDarkestOffset_On->isChecked();
+    imgProc->enableDarkestOffsetCorrection(enable);
+}
+
 void MainWindow::on_BlindPointDetect_sel()
 {
     if (!imgProc || !rbBlindOn || !rbBlindOff) return;
@@ -1282,6 +1396,11 @@ void MainWindow::TECTemp_LCDNumShow_slot(std::vector<float> temp)
     ui->VTEC_lcd->display(QString::number(temp[1], 'f', 3));
     ui->TECTACT_lcd->display(QString::number(temp[2], 'f', 3));
     ui->TECTSET_lcd->display(QString::number(temp[3], 'f', 3));
+}
+
+void MainWindow::Sharpness_LCDNumShow_slot(int value)
+{
+    ui->SharpnessValue_lcd->display(QString::number(value));
 }
 
 

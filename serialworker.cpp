@@ -1,5 +1,53 @@
 #include "serialworker.h"
 #include <QDebug>
+#include <QtGlobal>
+#include <cmath>
+
+namespace {
+constexpr float kTecVoltageMin = 0.3f;
+constexpr float kTecVoltageMax = 2.39f;
+constexpr float kTecDacVref = 2.5f;
+constexpr float kTecDacFullScale = 65535.0f;
+
+float tecVoltageToTemp(float voltage)
+{
+    return 23.5f * voltage * voltage * voltage
+         - 98.5f * voltage * voltage
+         + 170.0f * voltage
+         - 79.7f;
+}
+/**
+ * 因为三次方程 没有简单解析反函数，所以：
+ * 用 二分法（Bisection Method）
+ * 每次迭代把电压区间缩小一半
+ * 32 次迭代 ≈ 精度提高 2^-32
+ * （远超实际需求）
+ */
+float tecTempToVoltage(float temp)
+{
+    float lo = kTecVoltageMin;
+    float hi = kTecVoltageMax;
+    const float minTemp = tecVoltageToTemp(lo);
+    const float maxTemp = tecVoltageToTemp(hi);
+    const float target = qBound(minTemp, temp, maxTemp);
+
+    for (int i = 0; i < 32; ++i) {
+        const float mid = (lo + hi) * 0.5f;
+        if (tecVoltageToTemp(mid) < target)
+            lo = mid;
+        else
+            hi = mid;
+    }
+    return (lo + hi) * 0.5f;
+}
+
+unsigned short tecVoltageToDacCode(float voltage)
+{
+    const float limited = qBound(kTecVoltageMin, voltage, kTecVoltageMax);
+    const int code = qRound(limited * kTecDacFullScale / kTecDacVref);
+    return static_cast<unsigned short>(qBound(0, code, 65535));
+}
+}
 
 bool serial_bind_flag = false;
 //QByteArray baRcvData;
@@ -80,6 +128,7 @@ void SerialWorker::SerialPortInit(QString com_name)
 
     connect(serialWorker,&QSerialPort::readyRead,this,&SerialWorker::SerialPortReadyRead_Slot);
     connect(timer, &QTimer::timeout, this, &SerialWorker::timeUpdate);
+    timer->setInterval(50);
 
     if(serialWorker->open(QIODevice::ReadWrite)==true)
     {
@@ -300,13 +349,13 @@ void SerialWorker::InstructionCode(unsigned char flag,QList<float> SetVals)
             usValue = static_cast<unsigned short>(static_cast<int>(value));
             firstByte = static_cast<unsigned char>(usValue&0xFF);
             break;
-        case 0x0F:  //TEC VREF = 2.5V->0xFFF。
-            value = SetVals[i]*4095/2.5;
-            // 转换为整数,为了与后面统一，使用两字节存储
-            usValue = static_cast<unsigned short>(static_cast<int>(value));
+        case 0x0F:
+            value = tecTempToVoltage(SetVals[i]);
+            usValue = tecVoltageToDacCode(value);
 
             lowByte = static_cast<unsigned char>(usValue&0xFF);
             highByte = static_cast<unsigned char>((usValue>>8)&0xFF);
+            firstByte = 0xFF;
             break;
         case 0x10:  //帧间滤波
             lowByte = 0x00;
@@ -396,12 +445,14 @@ void SerialWorker::SerialSendData_Slot(QString buf)
 
 //串口解析，包括校验指令是否传输正确，以及将正确的指令解析处理发送到主窗口中
 //同样，不同于BJUT上位机，进行了个性化修改
-void SerialWorker::SerialAnalyse(const QByteArray &recvdata)
+void SerialWorker::SerialAnalyse(QByteArray &recvdata)
 {
     //将strList转换为std::vector<unsigned char>后进行数据传递，这样使用的时候不需要每次用到就进行数据转换进行转换，时间更快些
     // 开始计时
     //auto start = std::chrono::high_resolution_clock::now();
-    int LENGTH = 18;    //指令总长度，因为指令会不断修改，所以设置变量控制
+    const int minFrameLen = 8;
+    const int pollingLen   = 18;
+    const int pollingExtLen = 20;  // 含锐度的轮询响应
     QString str = recvdata.toHex(' ').toUpper().append(' ');
     QStringList strList = str.split(" ");
     strList.pop_back(); //移除最后一个元素，即空格
@@ -419,13 +470,22 @@ void SerialWorker::SerialAnalyse(const QByteArray &recvdata)
     auto find_next_header = [&](size_t from) {
         return std::find(byteArray.begin() + static_cast<long>(from), byteArray.end(), 0xEA);
     };
+    auto isValidFrame = [&](int len) -> bool {
+        if (byteArray.size() < static_cast<size_t>(len)) return false;
+        if (byteArray[len - 1] != 0x0A) return false;
+        if (byteArray[1] != 0x01) return false;
+        unsigned int sum = 0;
+        for (int i = 2; i <= len - 3; ++i) sum += byteArray[i];
+        const unsigned char calcSum = static_cast<unsigned char>(sum & 0xFF);
+        return calcSum == byteArray[len - 2];
+    };
+
     while(true)
     {
 
         // 检查帧头和帧尾
         if (byteArray.empty() ) {
-//            qDebug()<<"empty,end";
-            return;
+            break;
         }
 
         if (byteArray[0] != 0xEA ) {
@@ -438,58 +498,54 @@ void SerialWorker::SerialAnalyse(const QByteArray &recvdata)
             }
             else
             {
-                return;
+                break;
             }
         }
 //        int length = byteArray[1]; // 使用 unsigned char 类型
-        // 帧长至少 8 字节，不够就等下批数据
-        if (byteArray.size() < LENGTH) return;
-//        qDebug() << "length" << length;
+        // Not enough data for a minimal frame yet
+        if (byteArray.size() < static_cast<size_t>(minFrameLen)) break;
 
-        // 帧尾检查
-        if (byteArray[LENGTH-1] != 0x0A) {
-            // 当前 0xEA 并非真正帧头，尝试在后面继续找 0xEA
+        // 根据指令码（byteArray[2]）确定预期帧长度
+        int frameLength = 0;
+        if (byteArray.size() >= 3) {
+            const unsigned char cmd = byteArray[2];
+            if (cmd == 0xAA) {
+                // 轮询响应: 先尝试20字节(含锐度)，再尝试18字节
+                if (byteArray.size() >= static_cast<size_t>(pollingExtLen) && isValidFrame(pollingExtLen))
+                    frameLength = pollingExtLen;
+                else if (byteArray.size() >= static_cast<size_t>(pollingLen) && isValidFrame(pollingLen))
+                    frameLength = pollingLen;
+            } else {
+                // 标准8字节帧 (0x31锐度返回, 0xA0/0xA1/0xA2/0xA3等)
+                if (isValidFrame(minFrameLen))
+                    frameLength = minFrameLen;
+            }
+        }
+
+        if (frameLength == 0) {
+            if (byteArray.size() >= 2 && byteArray[1] != 0x01) {
+                qDebug() << "设备码不匹配:" << QString::number(byteArray[1], 16).toUpper();
+            }
             auto it = find_next_header(1);
             if (it != byteArray.end()) {
                 byteArray.erase(byteArray.begin(), it);
                 continue;
             } else {
-                return;
+                break;
             }
         }
-        // 设备码检查（当前协议固定 0x01，如需兼容多设备可放宽或改为白名单）
-        if (byteArray[1] != 0x01) {
-            qDebug() << "设备码不匹配:" << QString::number(byteArray[1], 16).toUpper();
-            auto it = find_next_header(1);
-            if (it != byteArray.end()) {
-                byteArray.erase(byteArray.begin(), it);
-                continue;
-            } else {
-                return;
-            }
-        }
-        // 累加和校验：SUM = (CMD + D1 + D2 + D3) & 0xFF；不包含设备码
-        unsigned int sum = 0;
-        for (int i = 2; i <= LENGTH-3; ++i) sum += byteArray[i];
-        unsigned char calcSum = static_cast<unsigned char>(sum & 0xFF);
-        if (calcSum != byteArray[LENGTH-2]) {
-            qDebug() << "累加和校验错误 计算:" << QString::number(calcSum, 16).toUpper()
-                     << " 接收:" << QString::number(byteArray[LENGTH-2], 16).toUpper();
-            // 以此 0xEA 不是有效帧头为准，继续向后寻找新的帧头
-            auto it = find_next_header(1);
-            if (it != byteArray.end()) {
-                byteArray.erase(byteArray.begin(), it);
-                continue;
-            } else {
-                return;
-            }
-        }
-        // 提取内容： [指令码, 数据1, 数据2, 数据3] -> 交给 InstructionAnalyse()
-        std::vector<unsigned char> content(byteArray.begin() + 2, byteArray.begin() + LENGTH-2);
+        // 提取内容： [指令码, 数据...] -> 交给 InstructionAnalyse()
+        std::vector<unsigned char> content(byteArray.begin() + 2, byteArray.begin() + frameLength - 2);
         InstructionAnalyse(content);
 
         // 丢弃已解析完的一帧，继续解析后续数据
-        byteArray.erase(byteArray.begin(), byteArray.begin() + LENGTH);
+        byteArray.erase(byteArray.begin(), byteArray.begin() + frameLength);
+    }
+
+    recvdata.clear();
+    recvdata.reserve(static_cast<int>(byteArray.size()));
+    for (const auto b : byteArray) {
+        recvdata.append(static_cast<char>(b));
     }
 
     // 结束计时
@@ -564,6 +620,7 @@ void SerialWorker::InstructionAnalyse(const std::vector<unsigned char> &content)
     if (content.size() < 4) return; // 保护：新协议至少 14 字节，兼容旧协议固定4字节长度
 
     if(content[0] == 0xAA){ //定时轮询指令
+        if (content.size() < 14) return;
         //自动积分时间
         const uint16_t code = static_cast<uint16_t>(static_cast<uint16_t>(content[2]) << 8 | content[3]);
         const float time_ms = static_cast<float>(code) / 100.0f;   // data*0.01ms
@@ -591,15 +648,19 @@ void SerialWorker::InstructionAnalyse(const std::vector<unsigned char> &content)
         const uint16_t VTEC = static_cast<uint16_t>(static_cast<uint16_t>(content[8]) << 8 | content[9]);
         const float VTEC_V = static_cast<float>(VTEC) / 1000.0f;   // data*0.001
         const uint16_t TMPACTUAL = static_cast<uint16_t>(static_cast<uint16_t>(content[10]) << 8 | content[11]);
-        const float TMPACTUAL_value = static_cast<float>(TMPACTUAL) / 1000.0f;   // data*0.001
+        const float TMPACTUAL_value = tecVoltageToTemp(static_cast<float>(TMPACTUAL) / 1000.0f);
         const uint16_t TMPSET = static_cast<uint16_t>(static_cast<uint16_t>(content[12]) << 8 | content[13]);
-        const float TMPSET_value = static_cast<float>(TMPSET) / 1000.0f;   // data*0.001
+        const float TMPSET_value = tecVoltageToTemp(static_cast<float>(TMPSET) / 1000.0f);
         std::vector<float>temp;
         temp.push_back(ITEC_A);
         temp.push_back(VTEC_V);
         temp.push_back(TMPACTUAL_value);
         temp.push_back(TMPSET_value);
         emit TECTemp_LCDNumShow(temp);
+        if (content.size() >= 16) {
+            const uint16_t sharpness = static_cast<uint16_t>(static_cast<uint16_t>(content[14]) << 8 | content[15]);
+            emit Sharpness_LCDNumShow(static_cast<int>(sharpness));
+        }
         return;
 
     }
@@ -639,13 +700,19 @@ void SerialWorker::InstructionAnalyse(const std::vector<unsigned char> &content)
     {
 
     }
+    else if (content[0] == 0x31) // sharpness standalone return
+    {
+        const uint16_t sharpness = static_cast<uint16_t>(static_cast<uint16_t>(content[2]) << 8 | content[3]);
+        emit Sharpness_LCDNumShow(static_cast<int>(sharpness));
+        return;
+    }
 }
 void SerialWorker::SerialPortReadyRead_Slot()
 {
     if (!serialWorker || !timer) return;
 
-    timer->start(200);//启动定时器，接收100毫秒数据（根据情况设定）
     baRcvData.append(serialWorker->readAll());
+    SerialAnalyse(baRcvData);
 
 //    qDebug()<<baRcvData;
 //    QByteArray data = serialWorker->readAll();
@@ -660,16 +727,15 @@ void SerialWorker::SerialPortReadyRead_Slot()
 void SerialWorker::timeUpdate()
 {
     timer->stop();
-    if(baRcvData.length()!=0)
-    {
-//        qDebug()<<"baRcvData"<<baRcvData;
-        // 解析接收到的数据
+    if (baRcvData.length() != 0) {
         SerialAnalyse(baRcvData);
-        QString str = baRcvData.toHex(' ').toUpper().append(' ');//十六进制显示
+        QString str = baRcvData.toHex(' ').toUpper().append(' ');
         emit recvDataSignal(str);
-
+        // 清除超过1KB的无法解析的残留数据，防止内存无限增长
+        if (baRcvData.length() > 1024) {
+            baRcvData.clear();
+        }
     }
-    baRcvData.clear();
 }
 
 void SerialWorker::string2Hex(QString str, QByteArray &senddata)

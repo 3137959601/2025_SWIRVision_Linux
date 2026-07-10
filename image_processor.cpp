@@ -71,6 +71,13 @@ void ImageProcessor::run()
                     emit captureStatus("亮场参考完成");
                 }
             }
+            if (capturingDarkest) {
+                darkestBuf.emplace_back(); srcStable.copyTo(darkestBuf.back());
+                if ((int)darkestBuf.size() >= sampleFrameNum) {
+                    capturingDarkest = false;
+                    computeDarkestOffsetLocked();
+                }
+            }
             // 样本到齐则计算 K/B 并量化
             if (!calibrated &&
                 (int)lowBuf.size()  >= sampleFrameNum &&
@@ -80,10 +87,23 @@ void ImageProcessor::run()
         }
 
         // 3) 两点校正（整数乘加）：若未开启或未校准，就直接拷贝
-        if (twoPointEnabled) {
+        if (darkestOffsetEnabled) {
+            QMutexLocker lk(&calibMutex);
+            if (darkestCalibrated && kbQuantized && !Kq.empty() && !BqDarkest.empty() &&
+                Kq.size()==src16.size() && BqDarkest.size()==src16.size()) {
+                cv::Mat rawSnap; srcStable.copyTo(rawSnap);
+                applyDarkestOffsetNUC_Int(rawSnap, proc16);
+            } else if (calibrated && kbQuantized && !Kq.empty() && !Bq.empty() &&
+                       Kq.size()==src16.size() && Bq.size()==src16.size()) {
+                cv::Mat rawSnap; srcStable.copyTo(rawSnap);
+                applyTwoPointNUC_Int(rawSnap, proc16);
+            } else {
+                srcStable.copyTo(proc16);
+            }
+        } else if (twoPointEnabled) {
             QMutexLocker lk(&calibMutex);
             if (calibrated && kbQuantized && !Kq.empty() && !Bq.empty() &&
-                Kq.size()==src16.size()) {
+                Kq.size()==src16.size() && Bq.size()==src16.size()) {
                 // 1) 封装零拷贝视图后，立即快照 多拷贝一次，避免帧撕裂的现象，后期可优化
                 cv::Mat rawSnap; srcStable.copyTo(rawSnap);
                 applyTwoPointNUC_Int(rawSnap, proc16);
@@ -188,28 +208,63 @@ void ImageProcessor::stop() {
 void ImageProcessor::startCaptureLow()  {
     QMutexLocker lk(&calibMutex);
     lowBuf.clear();
+    darkestBuf.clear();
+    darkestMean.release();
+    BqDarkest.release();
     capturingLow  = true;
     capturingHigh = false;
+    capturingDarkest = false;
     calibrated = false;
+    darkestCalibrated = false;
     emit captureStatus("开始采集暗场参考");
 }
 void ImageProcessor::startCaptureHigh() {
     QMutexLocker lk(&calibMutex);
     highBuf.clear();
+    darkestBuf.clear();
+    darkestMean.release();
+    BqDarkest.release();
     capturingHigh = true;
     capturingLow  = false;
+    capturingDarkest = false;
     calibrated = false;
+    darkestCalibrated = false;
     emit captureStatus("开始采集亮场参考");
+}
+void ImageProcessor::startCaptureDarkest() {
+    QMutexLocker lk(&calibMutex);
+    if (!calibrated || !kbQuantized || Kq.empty() || Bq.empty()) {
+        emit captureStatus("请先完成亮/暗场两点校准");
+        return;
+    }
+    darkestBuf.clear();
+    darkestMean.release();
+    BqDarkest.release();
+    capturingDarkest = true;
+    capturingLow = false;
+    capturingHigh = false;
+    darkestCalibrated = false;
+    emit captureStatus("开始采集最暗场参考");
 }
 void ImageProcessor::clearCalibration() {
     QMutexLocker lk(&calibMutex);
     lowBuf.clear();
     highBuf.clear();
+    darkestBuf.clear();
+    capturingLow=false;
+    capturingHigh=false;
+    capturingDarkest=false;
     lowMean.release();
     highMean.release();
+    darkestMean.release();
     Kmat.release();
     Bmat.release();
+    Kq.release();
+    Bq.release();
+    BqDarkest.release();
     calibrated=false;
+    darkestCalibrated=false;
+    kbQuantized=false;
     emit calibrationReady(false);
     emit captureStatus("校正参数已清除");
 }
@@ -337,8 +392,13 @@ void ImageProcessor::computeCalibrationLocked(int bitMax)
         }
     }
     kbQuantized = true;
+    darkestCalibrated = false;
+    BqDarkest.release();
 
     calibrated = true;
+    if (!darkestMean.empty() && darkestMean.size() == Bq.size()) {
+        computeDarkestOffsetLocked();
+    }
     emit calibrationReady(true);
     emit captureStatus(QString("校准完成：%1x%2").arg(lowMean.cols).arg(lowMean.rows));
     buildBPMFromTwoPointLocked();   //同时生成生成静态坏点掩膜
@@ -348,6 +408,39 @@ void ImageProcessor::computeCalibrationLocked(int bitMax)
 }
 
 // ========== 应用 NUC：dstF = clip(K*srcF + B, 0..bitMax) ==========
+void ImageProcessor::computeDarkestOffsetLocked()
+{
+    if (!calibrated || !kbQuantized || Bq.empty()) {
+        darkestCalibrated = false;
+        emit captureStatus("请先完成亮/暗场两点校准");
+        return;
+    }
+
+    if (!darkestBuf.empty()) {
+        darkestMean = meanOf(darkestBuf);
+    }
+    if (darkestMean.empty() || darkestMean.size() != Bq.size()) {
+        darkestCalibrated = false;
+        BqDarkest.release();
+        emit captureStatus("最暗场参考无效或尺寸不匹配");
+        return;
+    }
+
+    const int darkestGlobalMean = int(std::lround(cv::mean(darkestMean)[0]));
+    BqDarkest.create(Bq.size(), CV_32SC1);
+    for (int y = 0; y < Bq.rows; ++y) {
+        const int* b = Bq.ptr<int>(y);
+        int* out = BqDarkest.ptr<int>(y);
+        for (int x = 0; x < Bq.cols; ++x) {
+            out[x] = b[x] - darkestGlobalMean;
+        }
+    }
+
+    darkestCalibrated = true;
+    emit captureStatus(QString("最暗场参考完成：%1x%2，全局均值=%3 DN")
+                           .arg(darkestMean.cols).arg(darkestMean.rows).arg(darkestGlobalMean));
+}
+
 void ImageProcessor::applyTwoPointNUC(const cv::Mat& srcF, cv::Mat& dstF, int bitMax)
 {
     CV_Assert(!Kmat.empty() && !Bmat.empty());
@@ -378,6 +471,26 @@ void ImageProcessor::applyTwoPointNUC_Int(const cv::Mat &src16, cv::Mat &out16) 
         const uint16_t *s = src16.ptr<uint16_t>(y);
         const int *Kqi = Kq.ptr<int>(y);
         const int *Bqi = Bq.ptr<int>(y);
+        uint16_t *d = out16.ptr<uint16_t>(y);
+        for (int x=0; x<W; ++x) {
+            int v = (int)(((int64_t)Kqi[x] * s[x]) >> Q);
+            v += Bqi[x];
+            if (v < 0) v = 0; else if (v > vmax) v = vmax;
+            d[x] = (uint16_t)v;
+        }
+    }
+}
+
+void ImageProcessor::applyDarkestOffsetNUC_Int(const cv::Mat &src16, cv::Mat &out16) {
+    CV_Assert(src16.type()==CV_16UC1);
+    out16.create(src16.size(), CV_16UC1);
+    const int H=src16.rows, W=src16.cols;
+    const int Q = Qfrac;
+    const int vmax = bitMaxEff;
+    for (int y=0; y<H; ++y) {
+        const uint16_t *s = src16.ptr<uint16_t>(y);
+        const int *Kqi = Kq.ptr<int>(y);
+        const int *Bqi = BqDarkest.ptr<int>(y);
         uint16_t *d = out16.ptr<uint16_t>(y);
         for (int x=0; x<W; ++x) {
             int v = (int)(((int64_t)Kqi[x] * s[x]) >> Q);

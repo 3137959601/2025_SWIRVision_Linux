@@ -48,6 +48,8 @@ public slots:
     void enableTwoPoint(bool on) { twoPointEnabled = on; /*qDebug()<<"NUC toggled"<<on<<this;*/}
     void startCaptureLow();
     void startCaptureHigh();
+    void startCaptureDarkest();
+    void enableDarkestOffsetCorrection(bool on) { darkestOffsetEnabled = on; }
     void clearCalibration();
     void setSampleFrames(int n)  { sampleFrameNum = std::clamp(n, 1, 128); } // 参考帧数
 
@@ -97,17 +99,21 @@ private:
     // ===== 两点校正相关 =====
     QMutex calibMutex;              // 保护下列校准资源
     bool twoPointEnabled = false;   // UI 开关
+    bool darkestOffsetEnabled = false;
     bool capturingLow  = false;
     bool capturingHigh = false;
+    bool capturingDarkest = false;
     bool calibrated    = false;
+    bool darkestCalibrated = false;
     int  sampleFrameNum = 8;        // 每个参考至少采几帧求均值
     int  m_inputBits  = 16;         // 输入有效位（12/14/16 或 8）
     int  m_outputBits = 16;         // 输出位宽（8 或 16）
 
-    std::vector<cv::Mat> lowBuf, highBuf; // 暂存参考帧（16U）
+    std::vector<cv::Mat> lowBuf, highBuf, darkestBuf; // 暂存参考帧（16U）
     cv::Mat lowMean, highMean;            // 参考均值（32F）
+    cv::Mat darkestMean;                  // 最暗场参考均值（32F）
     cv::Mat Kmat, Bmat;                   // 每像素增益/偏置（32F）
-    cv::Mat Kq, Bq;                           // CV_32SC1（int32）
+    cv::Mat Kq, Bq, BqDarkest;                // CV_32SC1（int32）
     int     Qfrac = 14;                       // 定点小数位（推荐14）
     bool    kbQuantized = false;              // Kq/Bq 是否已量化就绪
     // === 有效满量程与健壮性参数 ===
@@ -118,10 +124,12 @@ private:
 
     // 生成 K/B
     void computeCalibrationLocked(int bitMax);
+    void computeDarkestOffsetLocked();
     // 应用 NUC：dstF = clip(K*srcF + B, 0..bitMax)
     void applyTwoPointNUC(const cv::Mat& srcF, cv::Mat& dstF, int bitMax);
     // 整型 NUC：src16 -> out16（0..65535）
     void applyTwoPointNUC_Int(const cv::Mat &src16, cv::Mat &out16);
+    void applyDarkestOffsetNUC_Int(const cv::Mat &src16, cv::Mat &out16);
 
     // ======= 静态坏点掩膜：参数与存储 =======
     bool bpmEnabled = false;     // UI 开关：是否启用坏点替代

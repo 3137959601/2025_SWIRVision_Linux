@@ -70,6 +70,7 @@ public:
     void on_medianblur_radio_sel();//中值滤波
     void on_EqualizeHist_sel();//直方图均衡
     void on_TwoPointCorrect_sel();
+    void on_DarkestOffsetCorrect_sel();
     void on_BlindPointDetect_sel();
     //FPGA串口指令
     void on_TEC_Power_sel();//TEC电源
@@ -107,6 +108,7 @@ private slots:
     void Int_LCDNumShow_slot(float time);
     void BoardTemp_LCDNumShow_slot(float temp);
     void TECTemp_LCDNumShow_slot(std::vector<float>(temp));
+    void Sharpness_LCDNumShow_slot(int value);
     void on_collect_brightfield_pB_clicked();
 
     void on_collect_darkfield_pB_clicked();
@@ -160,6 +162,12 @@ private:
     QButtonGroup* nucGroup = nullptr;          // on/off 组
     QRadioButton* rbNUC_On = nullptr;
     QRadioButton* rbNUC_Off = nullptr;
+
+    // 最暗场补偿校正
+    QGroupBox*    grpDarkestOffset = nullptr;
+    QPushButton*  btnDarkestRef = nullptr;
+    QRadioButton* rbDarkestOffset_On = nullptr;
+    QRadioButton* rbDarkestOffset_Off = nullptr;
 
     // 盲元去除
     QGroupBox*    grpBlind = nullptr;

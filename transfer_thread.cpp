@@ -380,6 +380,7 @@ void transferThread::bulkTransfer()
     index = 0;
     int frame_num;
     int package_num;
+    int last_package_num = 0;
 
     uint32_t length;
     uint32_t j;
@@ -446,6 +447,20 @@ bufferAccess.acquire();
  bufferAccess.release();  // 释放信号量，允许其他线程访问 buf_1
 
 
+                auto commitFrame = [&] {
+                    QMutexLocker lk(&widget_image::s_imgMutex);
+                    uint16_t* dst = widget_image::rawPtr();
+                    const int dstStridePx = widget_image::rawStridePx();
+                    if (dst && dstStridePx >= frameWidth) {
+                        for (int y = 0; y < frameHeight; ++y) {
+                            const uint16_t* s = usb_pic.data() + size_t(y) * frameWidth;
+                            uint16_t* d = dst + size_t(y) * dstStridePx;
+                            memcpy(d, s, size_t(frameWidth) * sizeof(uint16_t));
+                        }
+                    }
+                    emit updatapic();
+                };
+
                 for(j=0;j<length;j++)
                 {
                     if(buffer_2[j]==0x90&&buffer_2[j+1]==0xeb&&buffer_2[j+2]==0x00&&buffer_2[j+3]==0x00){
@@ -458,34 +473,21 @@ bufferAccess.acquire();
                         {
                             if (usb_pic.size() != size_t(frameWidth) * frameHeight)
                                 usb_pic.resize(size_t(frameWidth) * frameHeight);
+                            if (package_num == 1 && last_package_num > 1) {
+                                commitFrame();
+                            }
                         mutex.lock();
 //                            memcpy(usb_pic[package_num-1],&buffer_2[j+frameHeader],payloadBytes);
                             uint16_t* dstRow = usb_pic.data() + size_t(package_num - 1) * frameWidth;
                             memcpy(dstRow, &buffer_2[j + frameHeader], size_t(frameWidth) * sizeof(uint16_t));
 //                            memcpy(usb_pic_temp.data() + (package_num - 1)* frameWidth, &buffer_2[j + frameHeader], size_t(frameWidth) * sizeof(uint16_t));
                         mutex.unlock();
+                            last_package_num = package_num;
                         }
                         j += (lookahead - 1);  // 跳过当前帧的头+载荷
                         if(package_num==frameHeight)
                         {
-                            {
-                                QMutexLocker lk(&widget_image::s_imgMutex);
-
-//                                memcpy(widget_image::pic[0],&usb_pic[0],size_t(frameWidth) * frameHeight * sizeof(unsigned short));//如果usb_pic定义为数组而不是容器时，这样搬移数据
-                                uint16_t* dst = widget_image::rawPtr();
-                                const int dstStridePx = widget_image::rawStridePx();
-                                if (dst && dstStridePx >= frameWidth) {
-                                    for (int y = 0; y < frameHeight; ++y) {
-                                        const uint16_t* s = usb_pic.data() + size_t(y) * frameWidth;
-                                        uint16_t* d = dst + size_t(y) * dstStridePx;
-                                        memcpy(d, s, size_t(frameWidth) * sizeof(uint16_t));
-                                    }
-                                }
-//                        mutex.lock();
-//                            memset(usb_pic, 0, size_t(frameWidth) * frameHeight * sizeof(unsigned short)); // 使用 memset 快速清零
-//                        mutex.unlock();
-                            }
-                            emit updatapic();
+                            commitFrame();
                             // ===== USB 实际帧率统计（按完整帧）受4线程共用影响并不准确 =====
 //                            usbFpsCount++;
 //                            const qint64 ms = signalTimer.elapsed();
