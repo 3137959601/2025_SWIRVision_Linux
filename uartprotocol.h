@@ -19,10 +19,11 @@ struct TelemetryFrame
     quint16 crosshairX = 0;
     quint16 crosshairY = 0;
     quint16 comSetRaw = 0;
-    quint16 tecSetRaw = 0;
+    quint16 frameMetric = 0;
     quint8 linearKLevel = 0;
     quint8 linearBLevel = 0;
-    quint8 rotate = 0;
+    quint8 tpRegion = 0;
+    quint8 temperatureGroup = 0;
     quint8 autoRegion = 0;
     quint8 status0 = 0;
     quint8 status1 = 0;
@@ -46,9 +47,9 @@ struct TelemetryFrame
     bool sharpnessEnabled() const { return status1 & 0x20; }
     bool gainEnabled() const { return status1 & 0x10; }
     bool transferEnabled() const { return status1 & 0x08; }
-    bool enhanceEnabled() const { return status1 & 0x04; }
+    bool autoRoiEnabled() const { return status1 & 0x04; }
     bool iffEnabled() const { return status1 & 0x02; }
-    bool singlePointEnabled() const { return status1 & 0x01; }
+    bool autoTemperatureEnabled() const { return status1 & 0x01; }
     bool flashInitDone() const { return flashStatus & 0x04; }
     bool configSaveDone() const { return flashStatus & 0x02; }
     bool twoPointSaveDone() const { return flashStatus & 0x01; }

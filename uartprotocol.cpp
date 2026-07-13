@@ -92,10 +92,12 @@ QList<TelemetryFrame> UartProtocol::parseTelemetry(QByteArray &buffer, int *chec
         frame.crosshairX = u16(buffer, 18) & 0x0FFF;
         frame.crosshairY = u16(buffer, 20) & 0x0FFF;
         frame.comSetRaw = u16(buffer, 22) & 0x0FFF;
-        frame.tecSetRaw = u16(buffer, 24);
+        frame.frameMetric = u16(buffer, 24);
         frame.linearKLevel = byteAt(buffer, 26) & 0x3F;
         frame.linearBLevel = byteAt(buffer, 27) & 0x3F;
-        frame.rotate = byteAt(buffer, 28) & 0x07;
+        // byte28低4位为手动区域，高2位为DS18B20实际温度组：0/1/2=-10/15/40C。
+        frame.tpRegion = byteAt(buffer, 28) & 0x0F;
+        frame.temperatureGroup = (byteAt(buffer, 28) >> 4) & 0x03;
         frame.autoRegion = byteAt(buffer, 29) & 0x0F;
         frame.status0 = byteAt(buffer, 30);
         frame.status1 = byteAt(buffer, 31);

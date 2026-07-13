@@ -68,22 +68,24 @@ QWidget *TelemetryDebugDialog::buildStatusPanel()
     };
 
     addField(0, 0, "time", QStringLiteral("更新时间"));
-    addField(0, 1, "int", QStringLiteral("积分时间"));
-    addField(1, 0, "board", QStringLiteral("板间温度"));
+    addField(0, 1, "int", QStringLiteral("当前生效积分时间"));
+    addField(1, 0, "metric", QStringLiteral("像素均值"));
     addField(1, 1, "sharp", QStringLiteral("锐度"));
-    addField(2, 0, "itec", QStringLiteral("ITEC"));
-    addField(2, 1, "vtec", QStringLiteral("VTEC"));
-    addField(3, 0, "actual", QStringLiteral("TEC实际温度"));
-    addField(3, 1, "set", QStringLiteral("TEC设定温度"));
-    addField(4, 0, "cross", QStringLiteral("十字线坐标"));
-    addField(4, 1, "com", QStringLiteral("COM设定"));
-    addField(5, 0, "kb", QStringLiteral("K/B档位"));
-    addField(5, 1, "version", QStringLiteral("版本/日期"));
-    addField(6, 0, "manual_region", QStringLiteral("手动两点区域"));
-    addField(6, 1, "auto_region", QStringLiteral("自动两点区域"));
-    addField(7, 0, "algo0", QStringLiteral("算法状态0"), 3);
-    addField(8, 0, "algo1", QStringLiteral("算法状态1"), 3);
-    addField(9, 0, "flash", QStringLiteral("Flash状态"), 3);
+    addField(2, 0, "board", QStringLiteral("板间温度"));
+    addField(2, 1, "com", QStringLiteral("COM设定"));
+    addField(3, 0, "itec", QStringLiteral("ITEC"));
+    addField(3, 1, "vtec", QStringLiteral("VTEC"));
+    addField(4, 0, "actual", QStringLiteral("TEC实际温度"));
+    addField(4, 1, "set", QStringLiteral("TEC设定温度"));
+    addField(5, 0, "cross", QStringLiteral("十字线坐标"));
+    addField(5, 1, "kb", QStringLiteral("K/B档位"));
+    addField(6, 0, "tp_region", QStringLiteral("手动两点区域"));
+    addField(6, 1, "auto_region", QStringLiteral("当前生效区域"));
+    addField(7, 0, "temp_group", QStringLiteral("实际温度档位"));
+    addField(7, 1, "version", QStringLiteral("版本/日期"));
+    addField(8, 0, "algo0", QStringLiteral("算法状态0"), 3);
+    addField(9, 0, "algo1", QStringLiteral("算法状态1"), 3);
+    addField(10, 0, "flash", QStringLiteral("Flash状态"), 3);
     layout->addLayout(grid);
 
     auto *save = new QGridLayout;
@@ -135,12 +137,46 @@ QWidget *TelemetryDebugDialog::buildCommandPanel()
     layout->addWidget(intSet, row, 2);
     finishRow();
 
+    layout->addWidget(new QLabel(QStringLiteral("自动积分范围(ms)"), panel), row, 0);
+    auto *autoMin = new QDoubleSpinBox(panel);
+    auto *autoMax = new QDoubleSpinBox(panel);
+    autoMin->setRange(0.01, 40.95); autoMin->setDecimals(2); autoMin->setValue(0.20);
+    autoMax->setRange(0.01, 40.95); autoMax->setDecimals(2); autoMax->setValue(20.00);
+    layout->addWidget(autoMin, row, 1);
+    layout->addWidget(autoMax, row, 2);
+    auto *setAutoRange = new QPushButton(QStringLiteral("设置范围"), panel);
+    connect(setAutoRange, &QPushButton::clicked, this, [this, autoMin, autoMax]() {
+        const quint16 minRaw = quint16(qRound(autoMin->value() * 100.0));
+        const quint16 maxRaw = quint16(qRound(autoMax->value() * 100.0));
+        if (minRaw > maxRaw) return;
+        emitCommand(0x32, 0xFF, minRaw);
+        emitCommand(0x33, 0xFF, maxRaw);
+    });
+    layout->addWidget(setAutoRange, row, 3);
+    finishRow();
+
+    layout->addWidget(new QLabel(QStringLiteral("亮度阈值"), panel), row, 0);
+    auto *thrInc = new QSpinBox(panel);
+    auto *thrDec = new QSpinBox(panel);
+    thrInc->setRange(0, 8191); thrInc->setValue(3000);
+    thrDec->setRange(0, 8191); thrDec->setValue(6500);
+    layout->addWidget(thrInc, row, 1);
+    layout->addWidget(thrDec, row, 2);
+    auto *setThresholds = new QPushButton(QStringLiteral("设置阈值"), panel);
+    connect(setThresholds, &QPushButton::clicked, this, [this, thrInc, thrDec]() {
+        if (thrInc->value() >= thrDec->value()) return;
+        emitCommand(0x34, 0xFF, quint16(thrInc->value()));
+        emitCommand(0x35, 0xFF, quint16(thrDec->value()));
+    });
+    layout->addWidget(setThresholds, row, 3);
+    finishRow();
+
     layout->addWidget(new QLabel(QStringLiteral("COM电压(V)"), panel), row, 0);
     m_comVoltage = new QDoubleSpinBox(panel);
     m_comVoltage->setRange(0.0, 2.5);
     m_comVoltage->setDecimals(3);
     m_comVoltage->setSingleStep(0.01);
-    m_comVoltage->setValue(UartProtocol::comDacCodeToVoltage(0x0C28));
+    m_comVoltage->setValue(UartProtocol::comDacCodeToVoltage(0x0B84));
     layout->addWidget(m_comVoltage, row, 1);
     auto *comSet = new QPushButton(QStringLiteral("设置COM"), panel);
     connect(comSet, &QPushButton::clicked, this, [this]() {
@@ -175,6 +211,10 @@ QWidget *TelemetryDebugDialog::buildCommandPanel()
 
     button(0, QStringLiteral("两点G"), 0x02, 0xEE);
     button(1, QStringLiteral("两点O"), 0x02, 0xE0);
+    button(2, QStringLiteral("中心ROI"), 0x28, 0xFF);
+    button(3, QStringLiteral("全幅统计"), 0x28, 0xF0);
+    button(4, QStringLiteral("自动温区开"), 0x36, 0xFF);
+    button(5, QStringLiteral("自动温区关"), 0x36, 0xF0);
     finishRow();
 
     button(0, QStringLiteral("中值开"), 0x11, 0xFF);
@@ -207,9 +247,8 @@ QWidget *TelemetryDebugDialog::buildCommandPanel()
             const int region = group * 5 + index + 1;
             auto *regionButton = new QPushButton(QString::number(region), panel);
             regionButton->setCheckable(true);
-            regionButton->setEnabled(region <= 7);
-            if (region > 7)
-                regionButton->setToolTip(QStringLiteral("预留区域：FPGA扩展为4 bit后启用"));
+            regionButton->setToolTip(QStringLiteral("区域%1：%2第%3套积分表")
+                                     .arg(region).arg(temperatureGroups[group]).arg(index + 1));
             connect(regionButton, &QPushButton::clicked, this, [this, region]() {
                 emitCommand(0x12, 0xFF, quint16(region - 1));
             });
@@ -264,6 +303,7 @@ void TelemetryDebugDialog::handleFrame(const TelemetryFrame &f)
 {
     setValue("time", f.timestamp.toString("yyyy-MM-dd HH:mm:ss.zzz"));
     setValue("int", QStringLiteral("%1 ms (raw=%2)").arg(f.intTime / 100.0, 0, 'f', 2).arg(f.intTime));
+    setValue("metric", QString::number(f.frameMetric));
     setValue("board", QStringLiteral("%1 ℃ (%2)").arg(UartProtocol::ds18b20Temperature(f.boardTempRaw), 0, 'f', 2).arg(hex16(f.boardTempRaw)));
     setValue("itec", QStringLiteral("%1 A").arg(f.itecRaw / 1000.0, 0, 'f', 3));
     setValue("vtec", QStringLiteral("%1 V").arg(f.vtecRaw / 1000.0, 0, 'f', 3));
@@ -275,22 +315,42 @@ void TelemetryDebugDialog::handleFrame(const TelemetryFrame &f)
              .arg(UartProtocol::comDacCodeToVoltage(f.comSetRaw), 0, 'f', 3)
              .arg(hex16(f.comSetRaw)));
     setValue("kb", QStringLiteral("K=%1, B=%2").arg(f.linearKLevel).arg(f.linearBLevel));
-    const int region = int(f.rotate) + 1;
-    setValue("manual_region", QString::number(region));
-    setValue("auto_region", f.autoExposure()
-             ? QString::number(int(f.autoRegion) + 1)
-             : QStringLiteral("--（自动积分关闭）"));
+    const int region = int(f.tpRegion) + 1;
+    setValue("tp_region", QString::number(region));
+    const int activeRegion = int(f.autoRegion) + 1;
+    setValue("auto_region", QStringLiteral("区域%1 / %2 ms (raw=%3)")
+             .arg(activeRegion)
+             .arg(f.intTime / 100.0, 0, 'f', 2)
+             .arg(f.intTime));
+    const QStringList groupNames = {
+        QStringLiteral("低温档（-10℃表）"),
+        QStringLiteral("中温档（15℃表）"),
+        QStringLiteral("高温档（40℃表）")
+    };
+    const QString groupText = f.temperatureGroup < groupNames.size()
+        ? groupNames.at(f.temperatureGroup)
+        : QStringLiteral("未知档位%1").arg(f.temperatureGroup);
+    setValue("temp_group", QStringLiteral("%1 / 自动选择%2")
+             .arg(groupText, f.autoTemperatureEnabled() ? QStringLiteral("开启")
+                                                        : QStringLiteral("关闭")));
     for (auto it = m_regionButtons.cbegin(); it != m_regionButtons.cend(); ++it) {
-        const bool active = it.key() == region;
-        it.value()->setChecked(active);
-        it.value()->setStyleSheet(active
-            ? QStringLiteral("QPushButton { background:#16803c; color:white; font-weight:600; }")
-            : QString());
+        const bool manualSelected = it.key() == region;
+        const bool actuallyActive = it.key() == activeRegion;
+        it.value()->setChecked(manualSelected);
+        QStringList styles;
+        if (manualSelected)
+            styles << QStringLiteral("background:#16803c; color:white; font-weight:600");
+        if (actuallyActive)
+            styles << QStringLiteral("border:2px solid #2878c8");
+        it.value()->setStyleSheet(styles.isEmpty()
+            ? QString()
+            : QStringLiteral("QPushButton { %1; }").arg(styles.join(QStringLiteral("; "))));
     }
 
     const QString separator = QStringLiteral("&nbsp;&nbsp;&nbsp;");
     setValue("algo0", QStringList({
         statusMark(QStringLiteral("自动积分"), f.autoExposure()),
+        statusMark(QStringLiteral("中心ROI"), f.autoRoiEnabled()),
         statusMark(QStringLiteral("TEC"), f.tecEnabled()),
         statusMark(QStringLiteral("TEC电源"), f.tecPowerEnabled()),
         statusMark(QStringLiteral("两点"), f.twoPointEnabled()),
@@ -305,6 +365,7 @@ void TelemetryDebugDialog::handleFrame(const TelemetryFrame &f)
         statusMark(QStringLiteral("锐度"), f.sharpnessEnabled()),
         statusMark(QStringLiteral("探测器增益"), f.gainEnabled()),
         statusMark(QStringLiteral("测速"), f.transferEnabled()),
+        statusMark(QStringLiteral("自动温区"), f.autoTemperatureEnabled()),
         statusMark(QStringLiteral("帧间"), f.iffEnabled(), false)
     }).join(separator));
     setValue("version", QStringLiteral("V%1.%2 / %3-%4-%5")
@@ -344,18 +405,18 @@ void TelemetryDebugDialog::toggleCsv()
     m_csvFile.setFileName(m_csvPath);
     if (!m_csvFile.open(QIODevice::WriteOnly | QIODevice::Text)) return;
     QTextStream out(&m_csvFile);
-    out << "timestamp,int_time,board_temp_raw,itec,vtec,tmp_actual,tmp_set,sharpness,cross_x,cross_y,com_set,tec_set,k,b,manual_region,auto_region,status0,status1,version0,version1,year,month,day,flash\n";
+    out << "timestamp,int_time,frame_metric,board_temp_raw,itec,vtec,tmp_actual,tmp_set,sharpness,cross_x,cross_y,com_set,k,b,tp_region,temp_group,auto_region,status0,status1,version0,version1,year,month,day,flash\n";
     m_csvButton->setText(QStringLiteral("停止记录"));
 }
 
 void TelemetryDebugDialog::writeCsvRow(const TelemetryFrame &f)
 {
     QTextStream out(&m_csvFile);
-    out << f.timestamp.toString(Qt::ISODateWithMs) << ',' << f.intTime << ',' << f.boardTempRaw << ','
+    out << f.timestamp.toString(Qt::ISODateWithMs) << ',' << f.intTime << ',' << f.frameMetric << ',' << f.boardTempRaw << ','
         << f.itecRaw << ',' << f.vtecRaw << ',' << f.tmpActualRaw << ',' << f.tmpSetRaw << ','
         << f.sharpness << ',' << f.crosshairX << ',' << f.crosshairY << ',' << f.comSetRaw << ','
-        << f.tecSetRaw << ',' << f.linearKLevel << ',' << f.linearBLevel << ',' << f.rotate << ','
-        << f.autoRegion << ',' << f.status0 << ',' << f.status1 << ',' << f.version0 << ','
+        << f.linearKLevel << ',' << f.linearBLevel << ',' << f.tpRegion << ','
+        << f.temperatureGroup << ',' << f.autoRegion << ',' << f.status0 << ',' << f.status1 << ',' << f.version0 << ','
         << f.version1 << ',' << f.versionYear << ',' << f.versionMonth << ',' << f.versionDay << ','
         << f.flashStatus << '\n';
     m_csvFile.flush();
