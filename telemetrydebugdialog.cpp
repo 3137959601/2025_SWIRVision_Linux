@@ -37,6 +37,19 @@ QString completionMark(const QString &name, bool complete)
         .arg(color, name, complete ? QStringLiteral("完成") : QStringLiteral("未完成"));
 }
 
+QString tecMonitorText(quint16 rawMillivolts, bool powerEnabled)
+{
+    if (!powerEnabled)
+        return QStringLiteral("--（TEC电源关闭）");
+    const double voltage = rawMillivolts / 1000.0;
+    if (voltage < 0.3 || voltage > 2.39)
+        return QStringLiteral("无效监测值 %1 V (raw=%2)")
+            .arg(voltage, 0, 'f', 3).arg(rawMillivolts);
+    return QStringLiteral("%1 ℃ (%2 V)")
+        .arg(UartProtocol::tecVoltageToTemperature(voltage), 0, 'f', 2)
+        .arg(voltage, 0, 'f', 3);
+}
+
 } // namespace
 
 TelemetryDebugDialog::TelemetryDebugDialog(QWidget *parent) : QDialog(parent)
@@ -137,36 +150,44 @@ QWidget *TelemetryDebugDialog::buildCommandPanel()
     layout->addWidget(intSet, row, 2);
     finishRow();
 
-    layout->addWidget(new QLabel(QStringLiteral("自动积分范围(ms)"), panel), row, 0);
-    auto *autoMin = new QDoubleSpinBox(panel);
-    auto *autoMax = new QDoubleSpinBox(panel);
-    autoMin->setRange(0.01, 40.95); autoMin->setDecimals(2); autoMin->setValue(0.20);
-    autoMax->setRange(0.01, 40.95); autoMax->setDecimals(2); autoMax->setValue(20.00);
-    layout->addWidget(autoMin, row, 1);
-    layout->addWidget(autoMax, row, 2);
-    auto *setAutoRange = new QPushButton(QStringLiteral("设置范围"), panel);
-    connect(setAutoRange, &QPushButton::clicked, this, [this, autoMin, autoMax]() {
-        const quint16 minRaw = quint16(qRound(autoMin->value() * 100.0));
-        const quint16 maxRaw = quint16(qRound(autoMax->value() * 100.0));
-        if (minRaw > maxRaw) return;
-        emitCommand(0x32, 0xFF, minRaw);
-        emitCommand(0x33, 0xFF, maxRaw);
-    });
-    layout->addWidget(setAutoRange, row, 3);
-    finishRow();
+    auto addAutoRangeRow = [&](const QString &name, quint8 command,
+                               double defaultMin, double defaultMax) {
+        layout->addWidget(new QLabel(name, panel), row, 0);
+        auto *autoMin = new QDoubleSpinBox(panel);
+        auto *autoMax = new QDoubleSpinBox(panel);
+        autoMin->setRange(0.01, 40.95); autoMin->setDecimals(2); autoMin->setValue(defaultMin);
+        autoMax->setRange(0.01, 40.95); autoMax->setDecimals(2); autoMax->setValue(defaultMax);
+        layout->addWidget(autoMin, row, 1);
+        layout->addWidget(autoMax, row, 2);
+        auto *setAutoRange = new QPushButton(QStringLiteral("设置范围"), panel);
+        connect(setAutoRange, &QPushButton::clicked, this, [this, autoMin, autoMax, command]() {
+            const quint16 minRaw = quint16(qRound(autoMin->value() * 100.0));
+            const quint16 maxRaw = quint16(qRound(autoMax->value() * 100.0));
+            if (minRaw > maxRaw || minRaw > 0x0FFF || maxRaw > 0x0FFF)
+                return;
+            const quint32 payload = (quint32(minRaw) << 12) | maxRaw;
+            emitCommand(command, quint8(payload >> 16), quint16(payload));
+        });
+        layout->addWidget(setAutoRange, row, 3);
+        finishRow();
+    };
+    addAutoRangeRow(QStringLiteral("低温范围(ms)"), 0x32, 1.00, 30.00);
+    addAutoRangeRow(QStringLiteral("中温范围(ms)"), 0x33, 2.00, 20.00);
+    addAutoRangeRow(QStringLiteral("高温范围(ms)"), 0x34, 0.30, 3.00);
 
     layout->addWidget(new QLabel(QStringLiteral("亮度阈值"), panel), row, 0);
     auto *thrInc = new QSpinBox(panel);
     auto *thrDec = new QSpinBox(panel);
-    thrInc->setRange(0, 8191); thrInc->setValue(3000);
-    thrDec->setRange(0, 8191); thrDec->setValue(6500);
+    thrInc->setRange(0, 8190); thrInc->setSingleStep(2); thrInc->setValue(3000);
+    thrDec->setRange(0, 8190); thrDec->setSingleStep(2); thrDec->setValue(6500);
     layout->addWidget(thrInc, row, 1);
     layout->addWidget(thrDec, row, 2);
     auto *setThresholds = new QPushButton(QStringLiteral("设置阈值"), panel);
     connect(setThresholds, &QPushButton::clicked, this, [this, thrInc, thrDec]() {
         if (thrInc->value() >= thrDec->value()) return;
-        emitCommand(0x34, 0xFF, quint16(thrInc->value()));
-        emitCommand(0x35, 0xFF, quint16(thrDec->value()));
+        const quint32 payload = (quint32(thrInc->value() >> 1) << 12)
+                              | quint32(thrDec->value() >> 1);
+        emitCommand(0x35, quint8(payload >> 16), quint16(payload));
     });
     layout->addWidget(setThresholds, row, 3);
     finishRow();
@@ -186,7 +207,7 @@ QWidget *TelemetryDebugDialog::buildCommandPanel()
     finishRow();
 
     layout->addWidget(new QLabel(QStringLiteral("TEC温度(℃)"), panel), row, 0);
-    m_tecTemp = new QDoubleSpinBox(panel); m_tecTemp->setRange(-45.0, 90.0); m_tecTemp->setValue(20.0);
+    m_tecTemp = new QDoubleSpinBox(panel); m_tecTemp->setRange(-20.0, 60.0); m_tecTemp->setValue(15.0);
     layout->addWidget(m_tecTemp, row, 1);
     auto *tecSet = new QPushButton(QStringLiteral("设置TEC"), panel);
     connect(tecSet, &QPushButton::clicked, this, [this]() {
@@ -213,8 +234,8 @@ QWidget *TelemetryDebugDialog::buildCommandPanel()
     button(1, QStringLiteral("两点O"), 0x02, 0xE0);
     button(2, QStringLiteral("中心ROI"), 0x28, 0xFF);
     button(3, QStringLiteral("全幅统计"), 0x28, 0xF0);
-    button(4, QStringLiteral("自动温区开"), 0x36, 0xFF);
-    button(5, QStringLiteral("自动温区关"), 0x36, 0xF0);
+    button(4, QStringLiteral("自动温度开"), 0x36, 0xFF);
+    button(5, QStringLiteral("自动温度关"), 0x36, 0xF0);
     finishRow();
 
     button(0, QStringLiteral("中值开"), 0x11, 0xFF);
@@ -307,8 +328,8 @@ void TelemetryDebugDialog::handleFrame(const TelemetryFrame &f)
     setValue("board", QStringLiteral("%1 ℃ (%2)").arg(UartProtocol::ds18b20Temperature(f.boardTempRaw), 0, 'f', 2).arg(hex16(f.boardTempRaw)));
     setValue("itec", QStringLiteral("%1 A").arg(f.itecRaw / 1000.0, 0, 'f', 3));
     setValue("vtec", QStringLiteral("%1 V").arg(f.vtecRaw / 1000.0, 0, 'f', 3));
-    setValue("actual", QStringLiteral("%1 ℃").arg(UartProtocol::tecVoltageToTemperature(f.tmpActualRaw / 1000.0), 0, 'f', 2));
-    setValue("set", QStringLiteral("%1 ℃").arg(UartProtocol::tecVoltageToTemperature(f.tmpSetRaw / 1000.0), 0, 'f', 2));
+    setValue("actual", tecMonitorText(f.tmpActualRaw, f.tecPowerEnabled()));
+    setValue("set", tecMonitorText(f.tmpSetRaw, f.tecPowerEnabled()));
     setValue("sharp", QString::number(f.sharpness));
     setValue("cross", QStringLiteral("%1, %2").arg(f.crosshairX).arg(f.crosshairY));
     setValue("com", QStringLiteral("%1 V (%2)")
@@ -365,7 +386,7 @@ void TelemetryDebugDialog::handleFrame(const TelemetryFrame &f)
         statusMark(QStringLiteral("锐度"), f.sharpnessEnabled()),
         statusMark(QStringLiteral("探测器增益"), f.gainEnabled()),
         statusMark(QStringLiteral("测速"), f.transferEnabled()),
-        statusMark(QStringLiteral("自动温区"), f.autoTemperatureEnabled()),
+        statusMark(QStringLiteral("自动温度"), f.autoTemperatureEnabled()),
         statusMark(QStringLiteral("帧间"), f.iffEnabled(), false)
     }).join(separator));
     setValue("version", QStringLiteral("V%1.%2 / %3-%4-%5")
