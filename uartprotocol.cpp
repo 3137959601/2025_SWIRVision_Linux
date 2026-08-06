@@ -49,6 +49,18 @@ QByteArray UartProtocol::makeCrosshairCommand(quint16 x, quint16 y)
     return frame;
 }
 
+QByteArray UartProtocol::makeHistogramThresholdCommand(quint32 upper, quint32 lower)
+{
+    // 24 bit载荷直接携带两个12 bit平台计数，便于以1为步进在线调节。
+    if (upper > 0x0FFFu || lower > 0x0FFFu)
+        return QByteArray();
+    if (upper == 0 || upper <= lower)
+        return QByteArray();
+
+    const quint32 payload = (upper << 12) | lower;
+    return makeCommand(0x37, quint8(payload >> 16), quint16(payload));
+}
+
 QList<TelemetryFrame> UartProtocol::parseTelemetry(QByteArray &buffer, int *checksumErrors)
 {
     QList<TelemetryFrame> frames;

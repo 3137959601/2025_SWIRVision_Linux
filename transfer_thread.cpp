@@ -7,8 +7,10 @@
 
 #include "widget_image.h"
 //#define PACK_CONTINUE_CHECK
+#include <algorithm>
 #include <vector>
 #include <QSemaphore>
+#include <QMutexLocker>
 
 #ifdef PACK_CONTINUE_CHECK
 #define MAX_REQ_QUEUE    1
@@ -32,6 +34,22 @@ int index_cnt=0;
 
 QMutex bufferMutex;  // 用于线程安全的互斥锁
 QSemaphore bufferAccess(1);  // 信号量初始值为 1，表示一个线程可以访问
+
+// 四个USB接收线程共同填充一帧。USB请求的完成顺序不等于FPGA发送顺序，
+// 因此不能在“收到最后一行”时直接发布，否则尚未到达的16KB块会保留上一帧数据。
+// 这里按frame_num记录当前组装帧，并逐行标记；2048行全部到齐后才允许显示。
+QMutex frameAssemblyMutex;
+std::vector<uchar> frameRowReceived;
+int assemblingFrameNum = -1;
+int assembledRowCount = 0;
+bool assembledFramePublished = false;
+
+static bool isNewerFrameNumber(quint16 candidate, quint16 current)
+{
+    // 16bit帧号允许自然回绕；差值落在前半圈表示candidate更新。
+    const quint16 delta = quint16(candidate - current);
+    return delta != 0 && delta < 0x8000;
+}
 
 // === 数据流保存的静态资源 ===
 QMutex transferThread::s_streamMutex;
@@ -380,7 +398,6 @@ void transferThread::bulkTransfer()
     index = 0;
     int frame_num;
     int package_num;
-    int last_package_num = 0;
 
     uint32_t length;
     uint32_t j;
@@ -447,20 +464,6 @@ bufferAccess.acquire();
  bufferAccess.release();  // 释放信号量，允许其他线程访问 buf_1
 
 
-                auto commitFrame = [&] {
-                    QMutexLocker lk(&widget_image::s_imgMutex);
-                    uint16_t* dst = widget_image::rawPtr();
-                    const int dstStridePx = widget_image::rawStridePx();
-                    if (dst && dstStridePx >= frameWidth) {
-                        for (int y = 0; y < frameHeight; ++y) {
-                            const uint16_t* s = usb_pic.data() + size_t(y) * frameWidth;
-                            uint16_t* d = dst + size_t(y) * dstStridePx;
-                            memcpy(d, s, size_t(frameWidth) * sizeof(uint16_t));
-                        }
-                    }
-                    emit updatapic();
-                };
-
                 for(j=0;j<length;j++)
                 {
                     if(buffer_2[j]==0x90&&buffer_2[j+1]==0xeb&&buffer_2[j+2]==0x00&&buffer_2[j+3]==0x00){
@@ -469,25 +472,65 @@ bufferAccess.acquire();
                         package_num = buffer_2[j+8] + buffer_2[j+9]*256;
                         const bool pkg_ok  = (package_num >= 1 && package_num <= frameHeight);
                         const bool span_ok = (j + frameHeader + payloadBytes) <= buffer_2.size();
+                        bool frameReady = false;
                         if(pkg_ok && span_ok)
                         {
-                            if (usb_pic.size() != size_t(frameWidth) * frameHeight)
-                                usb_pic.resize(size_t(frameWidth) * frameHeight);
-                            if (package_num == 1 && last_package_num > 1) {
-                                commitFrame();
+                            QMutexLocker assemblyLock(&frameAssemblyMutex);
+                            const quint16 rxFrame = quint16(frame_num);
+                            const bool geometryChanged =
+                                usb_pic.size() != size_t(frameWidth) * frameHeight ||
+                                frameRowReceived.size() != size_t(frameHeight);
+
+                            if (geometryChanged) {
+                                usb_pic.assign(size_t(frameWidth) * frameHeight, uint16_t(0));
+                                frameRowReceived.assign(size_t(frameHeight), uchar(0));
+                                assemblingFrameNum = -1;
+                                assembledRowCount = 0;
+                                assembledFramePublished = false;
                             }
-                        mutex.lock();
-//                            memcpy(usb_pic[package_num-1],&buffer_2[j+frameHeader],payloadBytes);
-                            uint16_t* dstRow = usb_pic.data() + size_t(package_num - 1) * frameWidth;
-                            memcpy(dstRow, &buffer_2[j + frameHeader], size_t(frameWidth) * sizeof(uint16_t));
-//                            memcpy(usb_pic_temp.data() + (package_num - 1)* frameWidth, &buffer_2[j + frameHeader], size_t(frameWidth) * sizeof(uint16_t));
-                        mutex.unlock();
-                            last_package_num = package_num;
+
+                            if (assemblingFrameNum < 0 ||
+                                isNewerFrameNumber(rxFrame, quint16(assemblingFrameNum))) {
+                                assemblingFrameNum = int(rxFrame);
+                                std::fill(frameRowReceived.begin(), frameRowReceived.end(), uchar(0));
+                                assembledRowCount = 0;
+                                assembledFramePublished = false;
+                            }
+
+                            // 只接收当前组装帧。上一帧迟到的数据不能覆盖新帧同一行。
+                            if (assemblingFrameNum == int(rxFrame)) {
+                                const size_t rowIndex = size_t(package_num - 1);
+                                uint16_t* dstRow = usb_pic.data() + rowIndex * frameWidth;
+                                memcpy(dstRow, &buffer_2[j + frameHeader],
+                                       size_t(frameWidth) * sizeof(uint16_t));
+
+                                if (!frameRowReceived[rowIndex]) {
+                                    frameRowReceived[rowIndex] = 1;
+                                    ++assembledRowCount;
+                                }
+
+                                if (!assembledFramePublished &&
+                                    assembledRowCount == frameHeight) {
+                                    QMutexLocker imageLock(&widget_image::s_imgMutex);
+                                    uint16_t* dst = widget_image::rawPtr();
+                                    const int dstStridePx = widget_image::rawStridePx();
+                                    if (dst && dstStridePx >= frameWidth) {
+                                        for (int y = 0; y < frameHeight; ++y) {
+                                            const uint16_t* srcRow =
+                                                usb_pic.data() + size_t(y) * frameWidth;
+                                            memcpy(dst + size_t(y) * dstStridePx, srcRow,
+                                                   size_t(frameWidth) * sizeof(uint16_t));
+                                        }
+                                        assembledFramePublished = true;
+                                        frameReady = true;
+                                    }
+                                }
+                            }
                         }
                         j += (lookahead - 1);  // 跳过当前帧的头+载荷
-                        if(package_num==frameHeight)
+                        if(frameReady)
                         {
-                            commitFrame();
+                            emit updatapic();
                             // ===== USB 实际帧率统计（按完整帧）受4线程共用影响并不准确 =====
 //                            usbFpsCount++;
 //                            const qint64 ms = signalTimer.elapsed();

@@ -18,6 +18,7 @@ SOURCES += \
     common/tih_usb_device.cpp \
     gl_image_widget.cpp \
     image_processor.cpp \
+    linearstretchcalibrationdialog.cpp \
     main.cpp \
     mainwindow.cpp \
     serialworker.cpp \
@@ -34,6 +35,8 @@ HEADERS += \
     common/winusb_supp.h \
     gl_image_widget.h \
     image_processor.h \
+    linearstretchcalibrationdialog.h \
+    linearstretchmath.h \
     mainwindow.h \
     serialworker.h \
     telemetrydebugdialog.h \

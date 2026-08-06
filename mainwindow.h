@@ -44,6 +44,7 @@ namespace Ui {
 class MainWindow;
 }
 class TelemetryDebugDialog;
+class LinearStretchCalibrationDialog;
 
 class MainWindow : public QMainWindow
 {
@@ -209,6 +210,7 @@ private:
     QString m_imageSaveExt = "raw";
     bool m_streamSaving = false;
     TelemetryDebugDialog *m_telemetryDialog = nullptr;
+    LinearStretchCalibrationDialog *m_linearStretchDialog = nullptr;
 
 };
 

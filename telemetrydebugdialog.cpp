@@ -1,6 +1,7 @@
 #include "telemetrydebugdialog.h"
 
 #include <QDateTime>
+#include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QGridLayout>
@@ -10,9 +11,11 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSlider>
 #include <QSpinBox>
 #include <QStringList>
 #include <QTextStream>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
@@ -172,14 +175,14 @@ QWidget *TelemetryDebugDialog::buildCommandPanel()
         finishRow();
     };
     addAutoRangeRow(QStringLiteral("低温范围(ms)"), 0x32, 1.00, 30.00);
-    addAutoRangeRow(QStringLiteral("中温范围(ms)"), 0x33, 2.00, 20.00);
-    addAutoRangeRow(QStringLiteral("高温范围(ms)"), 0x34, 0.30, 3.00);
+    addAutoRangeRow(QStringLiteral("中温范围(ms)"), 0x33, 0.10, 30.00);
+    addAutoRangeRow(QStringLiteral("高温范围(ms)"), 0x34, 0.10, 22.00);
 
     layout->addWidget(new QLabel(QStringLiteral("亮度阈值"), panel), row, 0);
     auto *thrInc = new QSpinBox(panel);
     auto *thrDec = new QSpinBox(panel);
     thrInc->setRange(0, 8190); thrInc->setSingleStep(2); thrInc->setValue(3000);
-    thrDec->setRange(0, 8190); thrDec->setSingleStep(2); thrDec->setValue(6500);
+    thrDec->setRange(0, 8190); thrDec->setSingleStep(2); thrDec->setValue(5500);
     layout->addWidget(thrInc, row, 1);
     layout->addWidget(thrDec, row, 2);
     auto *setThresholds = new QPushButton(QStringLiteral("设置阈值"), panel);
@@ -252,6 +255,71 @@ QWidget *TelemetryDebugDialog::buildCommandPanel()
     button(4, QStringLiteral("K+"), 0x25, 0xFF);
     button(5, QStringLiteral("K-"), 0x25, 0xF0); finishRow();
 
+    auto *histUpperSlider = new QSlider(Qt::Horizontal, panel);
+    auto *histLowerSlider = new QSlider(Qt::Horizontal, panel);
+    m_histUpper = new QSpinBox(panel);
+    m_histLower = new QSpinBox(panel);
+    histUpperSlider->setRange(1, 4095);
+    histLowerSlider->setRange(0, 4094);
+    m_histUpper->setRange(1, 4095);
+    m_histLower->setRange(0, 4094);
+    m_histUpper->setValue(3200);
+    m_histLower->setValue(320);
+    histUpperSlider->setValue(m_histUpper->value());
+    histLowerSlider->setValue(m_histLower->value());
+
+    auto *histSendTimer = new QTimer(panel);
+    histSendTimer->setSingleShot(true);
+    histSendTimer->setInterval(120);
+    connect(histSendTimer, &QTimer::timeout, this, [this]() {
+        const QByteArray command = UartProtocol::makeHistogramThresholdCommand(
+            quint32(m_histUpper->value()), quint32(m_histLower->value()));
+        if (!command.isEmpty())
+            emit commandRequested(command);
+    });
+    connect(histUpperSlider, &QSlider::valueChanged, m_histUpper, &QSpinBox::setValue);
+    connect(histLowerSlider, &QSlider::valueChanged, m_histLower, &QSpinBox::setValue);
+    connect(m_histUpper, qOverload<int>(&QSpinBox::valueChanged), this,
+            [this, histUpperSlider, histSendTimer](int value) {
+        if (value <= m_histLower->value())
+            m_histLower->setValue(value - 1);
+        histUpperSlider->setValue(value);
+        if (!histSendTimer->isActive())
+            histSendTimer->start();
+    });
+    connect(m_histLower, qOverload<int>(&QSpinBox::valueChanged), this,
+            [this, histLowerSlider, histSendTimer](int value) {
+        if (value >= m_histUpper->value())
+            m_histUpper->setValue(value + 1);
+        histLowerSlider->setValue(value);
+        if (!histSendTimer->isActive())
+            histSendTimer->start();
+    });
+
+    layout->addWidget(new QLabel(QStringLiteral("直方图上平台"), panel), row, 0);
+    layout->addWidget(histUpperSlider, row, 1, 1, 4);
+    layout->addWidget(m_histUpper, row, 5);
+    finishRow();
+    layout->addWidget(new QLabel(QStringLiteral("直方图下平台"), panel), row, 0);
+    layout->addWidget(histLowerSlider, row, 1, 1, 4);
+    layout->addWidget(m_histLower, row, 5);
+    finishRow();
+
+    auto *setHistogramThresholds = new QPushButton(QStringLiteral("设置平台阈值"), panel);
+    setHistogramThresholds->setToolTip(QStringLiteral("立即应用；需要掉电保存时再点击“固化配置”"));
+    connect(setHistogramThresholds, &QPushButton::clicked, this, [this]() {
+        const QByteArray command = UartProtocol::makeHistogramThresholdCommand(
+            quint32(m_histUpper->value()), quint32(m_histLower->value()));
+        if (command.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("直方图平台"),
+                                 QStringLiteral("上平台必须大于下平台。"));
+            return;
+        }
+        emit commandRequested(command);
+    });
+    layout->addWidget(setHistogramThresholds, row, 4, 1, 2);
+    finishRow();
+
     button(2, QStringLiteral("B+"), 0x26, 0xFF);
     button(3, QStringLiteral("B-"), 0x26, 0xF0);
     button(4, QStringLiteral("锐度开"), 0x31, 0xFF);
@@ -261,23 +329,59 @@ QWidget *TelemetryDebugDialog::buildCommandPanel()
     button(1, QStringLiteral("测速模式关"), 0x2B, 0xF0); finishRow();
 
     title(QStringLiteral("两点参数区域"));
-    const QStringList temperatureGroups = {QStringLiteral("低温"), QStringLiteral("中温"), QStringLiteral("高温")};
-    for (int group = 0; group < 3; ++group) {
-        layout->addWidget(new QLabel(temperatureGroups[group], panel), row, 0);
-        for (int index = 0; index < 5; ++index) {
-            const int region = group * 5 + index + 1;
-            auto *regionButton = new QPushButton(QString::number(region), panel);
-            regionButton->setCheckable(true);
-            regionButton->setToolTip(QStringLiteral("区域%1：%2第%3套积分表")
-                                     .arg(region).arg(temperatureGroups[group]).arg(index + 1));
-            connect(regionButton, &QPushButton::clicked, this, [this, region]() {
-                emitCommand(0x12, 0xFF, quint16(region - 1));
-            });
-            m_regionButtons.insert(region, regionButton);
-            layout->addWidget(regionButton, row, index + 1);
+    m_regionLayoutMode = new QComboBox(panel);
+    m_regionLayoutMode->addItem(QStringLiteral("三温区：5 + 5 + 5"));
+    m_regionLayoutMode->addItem(QStringLiteral("双温区：15℃×8 + 40℃×7"));
+    m_regionLayoutMode->setCurrentIndex(1);
+    layout->addWidget(m_regionLayoutMode, row, 0, 1, 3);
+    finishRow();
+
+    auto createRegionPanel = [this, panel](const QList<QPair<QString, int>> &groups) {
+        auto *regionPanel = new QWidget(panel);
+        auto *regionLayout = new QGridLayout(regionPanel);
+        regionLayout->setContentsMargins(0, 0, 0, 0);
+        int firstRegion = 1;
+        for (int group = 0; group < groups.size(); ++group) {
+            const QString groupName = groups.at(group).first;
+            const int tableCount = groups.at(group).second;
+            regionLayout->addWidget(new QLabel(groupName, regionPanel), group, 0);
+            for (int index = 0; index < tableCount; ++index) {
+                const int region = firstRegion + index;
+                auto *regionButton = new QPushButton(QString::number(region), regionPanel);
+                regionButton->setFixedWidth(38);
+                regionButton->setCheckable(true);
+                regionButton->setToolTip(QStringLiteral("区域%1：%2第%3套积分表")
+                                         .arg(region).arg(groupName).arg(index + 1));
+                connect(regionButton, &QPushButton::clicked, this, [this, region]() {
+                    emitCommand(0x12, 0xFF, quint16(region - 1));
+                });
+                m_regionButtons.insert(region, regionButton);
+                regionLayout->addWidget(regionButton, group, index + 1);
+            }
+            firstRegion += tableCount;
         }
-        finishRow();
-    }
+        return regionPanel;
+    };
+
+    auto *legacyRegionPanel = createRegionPanel({
+        {QStringLiteral("低温"), 5},
+        {QStringLiteral("中温"), 5},
+        {QStringLiteral("高温"), 5}
+    });
+    auto *dualRegionPanel = createRegionPanel({
+        {QStringLiteral("15℃"), 8},
+        {QStringLiteral("40℃"), 7}
+    });
+    legacyRegionPanel->setVisible(false);
+    dualRegionPanel->setVisible(true);
+    connect(m_regionLayoutMode, qOverload<int>(&QComboBox::currentIndexChanged), this,
+            [legacyRegionPanel, dualRegionPanel](int index) {
+        legacyRegionPanel->setVisible(index == 0);
+        dualRegionPanel->setVisible(index == 1);
+    });
+    layout->addWidget(legacyRegionPanel, row, 0, 1, 6);
+    layout->addWidget(dualRegionPanel, row, 0, 1, 6);
+    finishRow();
 
     title(QStringLiteral("十字线"));
     button(0, QStringLiteral("十字线开"), 0x21, 0xFF); button(1, QStringLiteral("十字线关"), 0x21, 0xF0);
@@ -305,7 +409,12 @@ QWidget *TelemetryDebugDialog::buildCommandPanel()
     connect(rawSend, &QPushButton::clicked, this, [this]() {
         QByteArray raw = QByteArray::fromHex(m_rawCommand->text().toLatin1());
         if (raw.isEmpty()) QMessageBox::warning(this, QStringLiteral("串口指令"), QStringLiteral("HEX数据无效"));
-        else emit commandRequested(raw);
+        else {
+            if (raw.size() == 8 && quint8(raw.at(2)) == 0x0B &&
+                quint8(raw.at(3)) == 0xFF)
+                notifyConfigSaveRequested();
+            emit commandRequested(raw);
+        }
     });
     layout->addWidget(rawSend, row, 5);
 
@@ -317,11 +426,47 @@ QWidget *TelemetryDebugDialog::buildCommandPanel()
 
 void TelemetryDebugDialog::emitCommand(quint8 code, quint8 control, quint16 value)
 {
+    if (code == 0x0B && control == 0xFF)
+        notifyConfigSaveRequested();
     emit commandRequested(UartProtocol::makeCommand(code, control, value));
+}
+
+void TelemetryDebugDialog::notifyConfigSaveRequested()
+{
+    m_configSavePending = true;
+    m_configSaveSawClear = false;
+    m_configSaveRequestMs = QDateTime::currentMSecsSinceEpoch();
+    updateFlashStatus();
+}
+
+void TelemetryDebugDialog::updateFlashStatus()
+{
+    const bool flashInitDone = (m_lastFlashStatus & 0x04) != 0;
+    const bool configSaveDone = (m_lastFlashStatus & 0x02) != 0 && !m_configSavePending;
+    const bool twoPointSaveDone = (m_lastFlashStatus & 0x01) != 0;
+    const QString separator = QStringLiteral("&nbsp;&nbsp;&nbsp;");
+    setValue("flash", QStringList({
+        completionMark(QStringLiteral("初始化"), flashInitDone),
+        completionMark(QStringLiteral("配置固化"), configSaveDone),
+        completionMark(QStringLiteral("两点固化"), twoPointSaveDone)
+    }).join(separator));
 }
 
 void TelemetryDebugDialog::handleFrame(const TelemetryFrame &f)
 {
+    m_lastFlashStatus = f.flashStatus;
+    if (m_configSavePending) {
+        if (!f.configSaveDone())
+            m_configSaveSawClear = true;
+
+        // 优先等待FPGA回传一次未完成；若清零窗口短于遥测周期，则忽略命令后
+        // 250 ms内可能仍在串口链路中的旧完成帧，再接受FPGA的新完成状态。
+        const bool staleWindowExpired =
+            QDateTime::currentMSecsSinceEpoch() - m_configSaveRequestMs >= 250;
+        if (f.configSaveDone() && (m_configSaveSawClear || staleWindowExpired))
+            m_configSavePending = false;
+    }
+
     setValue("time", f.timestamp.toString("yyyy-MM-dd HH:mm:ss.zzz"));
     setValue("int", QStringLiteral("%1 ms (raw=%2)").arg(f.intTime / 100.0, 0, 'f', 2).arg(f.intTime));
     setValue("metric", QString::number(f.frameMetric));
@@ -343,11 +488,12 @@ void TelemetryDebugDialog::handleFrame(const TelemetryFrame &f)
              .arg(activeRegion)
              .arg(f.intTime / 100.0, 0, 'f', 2)
              .arg(f.intTime));
-    const QStringList groupNames = {
-        QStringLiteral("低温档（-10℃表）"),
-        QStringLiteral("中温档（15℃表）"),
-        QStringLiteral("高温档（40℃表）")
-    };
+    const bool dualTemperatureLayout = m_regionLayoutMode && m_regionLayoutMode->currentIndex() == 1;
+    const QStringList groupNames = dualTemperatureLayout
+        ? QStringList{QStringLiteral("兼容低温编码"), QStringLiteral("15℃参数组"),
+                      QStringLiteral("40℃参数组")}
+        : QStringList{QStringLiteral("低温档（-10℃表）"), QStringLiteral("中温档（15℃表）"),
+                      QStringLiteral("高温档（40℃表）")};
     const QString groupText = f.temperatureGroup < groupNames.size()
         ? groupNames.at(f.temperatureGroup)
         : QStringLiteral("未知档位%1").arg(f.temperatureGroup);
@@ -391,11 +537,7 @@ void TelemetryDebugDialog::handleFrame(const TelemetryFrame &f)
     }).join(separator));
     setValue("version", QStringLiteral("V%1.%2 / %3-%4-%5")
              .arg(f.version0).arg(f.version1).arg(f.versionYear).arg(f.versionMonth).arg(f.versionDay));
-    setValue("flash", QStringList({
-        completionMark(QStringLiteral("初始化"), f.flashInitDone()),
-        completionMark(QStringLiteral("配置固化"), f.configSaveDone()),
-        completionMark(QStringLiteral("两点固化"), f.twoPointSaveDone())
-    }).join(separator));
+    updateFlashStatus();
     if (m_csvFile.isOpen()) writeCsvRow(f);
 }
 

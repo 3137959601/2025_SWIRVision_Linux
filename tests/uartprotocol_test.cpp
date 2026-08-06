@@ -74,6 +74,12 @@ int main(int argc, char *argv[])
             "auto temperature enable command");
     require(UartProtocol::makeCommand(0x36, 0xF0).toHex().toUpper() == "EA0136F00000260A",
             "auto temperature disable command");
+    require(UartProtocol::makeHistogramThresholdCommand(3200, 320).toHex().toUpper() ==
+            "EA0137C80140400A", "histogram threshold command");
+    require(UartProtocol::makeHistogramThresholdCommand(75, 15).toHex().toUpper() ==
+            "EA013704B00FFA0A", "fine histogram threshold command");
+    require(UartProtocol::makeHistogramThresholdCommand(320, 320).isEmpty(),
+            "invalid histogram threshold command");
     require(UartProtocol::comVoltageToDacCode(2.5) == 0x0FFF, "COM full scale");
     require(qAbs(UartProtocol::comDacCodeToVoltage(0x0C28) - 1.9) < 0.001,
             "COM voltage conversion");

@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "linearstretchcalibrationdialog.h"
 #include "ui_mainwindow.h"
 #include "common/device.h"
 #include "telemetrydebugdialog.h"
@@ -302,14 +303,20 @@ void MainWindow::initSerial()
     // 独立非模态串口调试窗口：串口线程负责解析，主线程只更新界面。
     m_telemetryDialog = new TelemetryDebugDialog(this);
     m_telemetryDialog->hide();
+    m_linearStretchDialog = new LinearStretchCalibrationDialog(this);
+    m_linearStretchDialog->hide();
     connect(m_telemetryDialog, &TelemetryDebugDialog::commandRequested,
             serialworker, &SerialWorker::SerialSendBytes_Slot, Qt::QueuedConnection);
     connect(serialworker, &SerialWorker::telemetryFramesReady, this,
             [this](const QList<TelemetryFrame> &frames, int checksumErrors) {
-        if (!m_telemetryDialog) return;
-        m_telemetryDialog->addChecksumErrors(checksumErrors);
-        for (const TelemetryFrame &frame : frames)
-            m_telemetryDialog->handleFrame(frame);
+        if (m_telemetryDialog)
+            m_telemetryDialog->addChecksumErrors(checksumErrors);
+        for (const TelemetryFrame &frame : frames) {
+            if (m_telemetryDialog)
+                m_telemetryDialog->handleFrame(frame);
+            if (m_linearStretchDialog)
+                m_linearStretchDialog->handleTelemetryFrame(frame);
+        }
     });
 
     auto *debugMenu = menuBar()->addMenu(QStringLiteral("调试"));
@@ -318,6 +325,12 @@ void MainWindow::initSerial()
         m_telemetryDialog->show();
         m_telemetryDialog->raise();
         m_telemetryDialog->activateWindow();
+    });
+    auto *linearStretchAction = debugMenu->addAction(QStringLiteral("线性拉伸标定"));
+    connect(linearStretchAction, &QAction::triggered, this, [this]() {
+        m_linearStretchDialog->show();
+        m_linearStretchDialog->raise();
+        m_linearStretchDialog->activateWindow();
     });
 }
 
@@ -511,6 +524,10 @@ void MainWindow::initImageProcessing() {
     // 处理器 -> UI 重绘
 //    connect(imgProc,&ImageProcessor::updataimage,this->m_imageWidget,&widget_image::repaintImage);//draw线程绘图结束，主线程更新界面
     connect(imgProc, &ImageProcessor::updataimage, this->m_glView,&GLImageWidget::repaintFromSharedImage);
+    // 标定窗口只读取完整原始帧做软件统计，不参与主显示链路，也不发送下位机指令。
+    connect(imgProc, &ImageProcessor::updataimage,
+            m_linearStretchDialog, &LinearStretchCalibrationDialog::handleFrameAvailable,
+            Qt::QueuedConnection);
     // 7.1 两点校正
     connect(rbNUC_On,  &QRadioButton::clicked, this, &MainWindow::on_TwoPointCorrect_sel);
     connect(rbNUC_Off, &QRadioButton::clicked, this, &MainWindow::on_TwoPointCorrect_sel);
@@ -1500,6 +1517,8 @@ void MainWindow::on_twoPointsFixPB_clicked()
 void MainWindow::on_configFixpB_clicked()
 {
 
+    if (m_telemetryDialog)
+        m_telemetryDialog->notifyConfigSaveRequested();
     emit serial_send_signal(QStringLiteral("EA010BFF00000A0A")); // 固化配置
     statusBar()->showMessage(QStringLiteral("已发送：固化配置 (0x0B)"), 2000);
 }

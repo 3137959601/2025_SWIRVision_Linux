@@ -64,6 +64,7 @@ constexpr int TelemetryFrameSize = 40;
 
 QByteArray makeCommand(quint8 code, quint8 control, quint16 value = 0);
 QByteArray makeCrosshairCommand(quint16 x, quint16 y);
+QByteArray makeHistogramThresholdCommand(quint32 upper, quint32 lower);
 QList<TelemetryFrame> parseTelemetry(QByteArray &buffer, int *checksumErrors = nullptr);
 
 double ds18b20Temperature(quint16 raw);
