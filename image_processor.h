@@ -15,7 +15,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "opencv2/opencv.hpp"
+#include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <omp.h>
 

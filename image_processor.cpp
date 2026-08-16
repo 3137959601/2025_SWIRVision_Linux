@@ -1,5 +1,7 @@
 #include "image_processor.h"
 
+#include <opencv2/imgcodecs.hpp>
+
 
 static QMutex mutex;
 
