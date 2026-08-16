@@ -7,11 +7,6 @@
 
 #include "widget_image.h"
 //#define PACK_CONTINUE_CHECK
-#include <algorithm>
-#include <deque>
-#include <iterator>
-#include <vector>
-#include <QSemaphore>
 #include <QMutexLocker>
 
 #ifdef PACK_CONTINUE_CHECK
@@ -27,53 +22,15 @@ static QMutex mutex;
 QFile errFile("./err_log.txt");
 int errLogFlag = 0;
 
-// 全局变量声明
-uchar *buf_1[2*MAX_REQ_QUEUE];
-int index_cnt=0;
-
-QMutex bufferMutex;  // 用于线程安全的互斥锁
-QSemaphore bufferAccess(1);  // 信号量初始值为 1，表示一个线程可以访问
-
-// 四个USB接收线程的完成顺序不等于FPGA发送顺序，相邻帧可能交错到达。
-// 同时保留三个帧槽，避免看到新帧号时直接丢弃上一帧尚未到达的行。
-QMutex frameAssemblyMutex;
-constexpr size_t kFrameAssemblySlots = 3;
-
-struct FrameAssemblySlot
-{
-    quint16 frameNum = 0;
-    std::vector<uint16_t> pixels;
-    std::vector<uchar> rowReceived;
-    int rowCount = 0;
-
-    FrameAssemblySlot(quint16 number, int width, int height)
-        : frameNum(number),
-          pixels(size_t(width) * size_t(height), uint16_t(0)),
-          rowReceived(size_t(height), uchar(0))
-    {
-    }
-};
-
-std::deque<FrameAssemblySlot> frameAssemblySlots;
-int frameAssemblyWidth = 0;
-int frameAssemblyHeight = 0;
-int newestReceivedFrameNum = -1;
-int lastPublishedFrameNum = -1;
-int frameAssemblyActiveThreads = 0;
-
-static bool isNewerFrameNumber(quint16 candidate, quint16 current)
-{
-    // 16bit帧号允许自然回绕；差值落在前半圈表示candidate更新。
-    const quint16 delta = quint16(candidate - current);
-    return delta != 0 && delta < 0x8000;
-}
-
 // === 数据流保存的静态资源 ===
 QMutex transferThread::s_streamMutex;
 QFile  transferThread::s_streamFile;
 bool   transferThread::s_streamEnabled = false;
 
-transferThread::transferThread(tihUSBDevice *dev, bool check, bool mode)
+transferThread::transferThread(
+    tihUSBDevice *dev, bool check, bool mode,
+    std::shared_ptr<swir::usb::FrameAssembler> sharedFrameAssembler)
+    : frameAssembler(std::move(sharedFrameAssembler))
 {
     usbInterface = dev;
     dataCheckEnable = check;
@@ -352,18 +309,6 @@ void transferThread::bulkTransfer()
     long errCode;
     uchar *buf[MAX_REQ_QUEUE];
 
-    {
-        QMutexLocker assemblyLock(&frameAssemblyMutex);
-        if (frameAssemblyActiveThreads == 0) {
-            frameAssemblySlots.clear();
-            frameAssemblyWidth = 0;
-            frameAssemblyHeight = 0;
-            newestReceivedFrameNum = -1;
-            lastPublishedFrameNum = -1;
-        }
-        ++frameAssemblyActiveThreads;
-    }
-
     OVERLAPPED ov[MAX_REQ_QUEUE];
     OVERLAPPED ovcmd[MAX_REQ_QUEUE];
 
@@ -393,10 +338,6 @@ void transferThread::bulkTransfer()
         default:
             break;
     }
-    for (int i = 0; i < 2 * MAX_REQ_QUEUE; i++) {
-        buf_1[i] = new uchar[transferPackSize]; // 为每个 buf_1[i] 分配内存
-    }
-
     /* start request */
     for (i = 0; i < MAX_REQ_QUEUE; i++) {
         memset(ov + i, 0, sizeof(OVERLAPPED));
@@ -425,26 +366,7 @@ void transferThread::bulkTransfer()
     }
 
     index = 0;
-    int frame_num;
-    int package_num;
-
     uint32_t length;
-    uint32_t j;
-//    uchar buffer_1[1296];
-//    uchar buffer_2[1051168];
-    const int payloadBytes = frameWidth * pixelBytes;     // 每包的像素载荷字节数
-    const int lookahead    = frameHeader + payloadBytes;  // 用于跨包拼接的追补字节
-
-    std::vector<uchar> buffer_1(lookahead);
-    std::vector<uchar> buffer_2(transferPackSize + lookahead);
-
-//    std::vector<uchar> buffer_1;
-
-    //std::vector<uint16_t> merged_values;
-//    uint16_t merged_values[525584];
-//     std::vector<ushort> usb_pic_temp;
-//     usb_pic_temp.resize(512 * 640);
-//    std::vector<std::vector<unsigned short>> usb_pic_temp(512, std::vector<unsigned short>(640));
     while (1) {
         if (ov[index].hEvent) {
 
@@ -468,171 +390,7 @@ void transferThread::bulkTransfer()
                         // 想更保险一点也可以 s_streamFile.flush();
                     }
                 }
-bufferAccess.acquire();
-//bufferMutex.lock();
-                memcpy(buf_1[index_cnt], buf[index], length);
-
-                if(index_cnt==0)
-                {
-                    memcpy(buffer_2.data(), buf_1[2*MAX_REQ_QUEUE-1], length);
-                    memcpy(buffer_1.data(), buf_1[0], lookahead);
-                }
-                else
-                {
-                    memcpy(buffer_2.data(), buf_1[index_cnt-1], length);
-                    memcpy(buffer_1.data(), buf_1[index_cnt],   lookahead);
-                }
-                if(++index_cnt==2*MAX_REQ_QUEUE)
-                {
-                    index_cnt=0;
-                }
-//                memcpy(buffer_2+length,buffer_1,1296);
-                memcpy(buffer_2.data() + length, buffer_1.data(), lookahead);
-//bufferMutex.unlock();
- bufferAccess.release();  // 释放信号量，允许其他线程访问 buf_1
-
-
-                for(j=0;j<length;j++)
-                {
-                    if(buffer_2[j]==0x90&&buffer_2[j+1]==0xeb&&buffer_2[j+2]==0x00&&buffer_2[j+3]==0x00){
-
-                        frame_num = buffer_2[j+10] + buffer_2[j+11]*256;
-                        package_num = buffer_2[j+8] + buffer_2[j+9]*256;
-                        const bool pkg_ok  = (package_num >= 1 && package_num <= frameHeight);
-                        const bool span_ok = (j + frameHeader + payloadBytes) <= buffer_2.size();
-                        bool frameReady = false;
-                        if(pkg_ok && span_ok)
-                        {
-                            QMutexLocker assemblyLock(&frameAssemblyMutex);
-                            const quint16 rxFrame = quint16(frame_num);
-                            const bool geometryChanged =
-                                frameAssemblyWidth != frameWidth ||
-                                frameAssemblyHeight != frameHeight;
-
-                            if (geometryChanged) {
-                                frameAssemblySlots.clear();
-                                frameAssemblyWidth = frameWidth;
-                                frameAssemblyHeight = frameHeight;
-                                newestReceivedFrameNum = -1;
-                                lastPublishedFrameNum = -1;
-                            }
-
-                            // 已发布帧及更旧帧的迟到数据不再参与组帧，防止画面倒退。
-                            const bool frameAlreadyExpired =
-                                lastPublishedFrameNum >= 0 &&
-                                (rxFrame == quint16(lastPublishedFrameNum) ||
-                                 !isNewerFrameNumber(rxFrame,
-                                                     quint16(lastPublishedFrameNum)));
-
-                            if (!frameAlreadyExpired) {
-                                if (newestReceivedFrameNum < 0 ||
-                                    isNewerFrameNumber(rxFrame,
-                                                       quint16(newestReceivedFrameNum))) {
-                                    newestReceivedFrameNum = int(rxFrame);
-                                }
-
-                                frameAssemblySlots.erase(
-                                    std::remove_if(
-                                        frameAssemblySlots.begin(),
-                                        frameAssemblySlots.end(),
-                                        [](const FrameAssemblySlot &slot) {
-                                            const quint16 age = quint16(
-                                                quint16(newestReceivedFrameNum) -
-                                                slot.frameNum);
-                                            return age >= quint16(
-                                                       kFrameAssemblySlots) &&
-                                                   age < 0x8000;
-                                        }),
-                                    frameAssemblySlots.end());
-
-                                // 只接受最新帧及其前两个相邻帧。更早的数据即使迟到，
-                                // 也不应挤掉仍在组装的有效帧。
-                                const quint16 age = quint16(
-                                    quint16(newestReceivedFrameNum) - rxFrame);
-                                const bool frameWithinWindow =
-                                    age < quint16(kFrameAssemblySlots);
-
-                                if (frameWithinWindow) {
-                                    auto slotIt = std::find_if(
-                                        frameAssemblySlots.begin(),
-                                        frameAssemblySlots.end(),
-                                        [rxFrame](const FrameAssemblySlot &slot) {
-                                            return slot.frameNum == rxFrame;
-                                        });
-
-                                    if (slotIt == frameAssemblySlots.end()) {
-                                        frameAssemblySlots.emplace_back(
-                                            rxFrame, frameWidth, frameHeight);
-                                        slotIt = std::prev(frameAssemblySlots.end());
-                                    }
-
-                                    const size_t rowIndex = size_t(package_num - 1);
-                                    uint16_t *dstRow = slotIt->pixels.data() +
-                                                       rowIndex * frameWidth;
-                                    memcpy(dstRow, &buffer_2[j + frameHeader],
-                                           size_t(frameWidth) * sizeof(uint16_t));
-
-                                    if (!slotIt->rowReceived[rowIndex]) {
-                                        slotIt->rowReceived[rowIndex] = 1;
-                                        ++slotIt->rowCount;
-                                    }
-
-                                    if (slotIt->rowCount == frameHeight) {
-                                        QMutexLocker imageLock(
-                                            &widget_image::s_imgMutex);
-                                        uint16_t *dst = widget_image::rawPtr();
-                                        const int dstStridePx =
-                                            widget_image::rawStridePx();
-                                        if (dst && dstStridePx >= frameWidth) {
-                                            for (int y = 0; y < frameHeight; ++y) {
-                                                const uint16_t *srcRow =
-                                                    slotIt->pixels.data() +
-                                                    size_t(y) * frameWidth;
-                                                memcpy(dst + size_t(y) * dstStridePx,
-                                                       srcRow,
-                                                       size_t(frameWidth) *
-                                                           sizeof(uint16_t));
-                                            }
-                                            lastPublishedFrameNum = int(rxFrame);
-                                            frameReady = true;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (frameReady) {
-                                // 发布后仅保留比当前显示帧更新的槽；当前帧和旧帧
-                                // 后续到达的重复行会由frameAlreadyExpired直接丢弃。
-                                frameAssemblySlots.erase(
-                                    std::remove_if(
-                                        frameAssemblySlots.begin(),
-                                        frameAssemblySlots.end(),
-                                        [rxFrame](const FrameAssemblySlot &slot) {
-                                            return slot.frameNum == rxFrame ||
-                                                   !isNewerFrameNumber(
-                                                       slot.frameNum, rxFrame);
-                                        }),
-                                    frameAssemblySlots.end());
-                            }
-                        }
-                        j += (lookahead - 1);  // 跳过当前帧的头+载荷
-                        if(frameReady)
-                        {
-                            emit updatapic();
-                            // ===== USB 实际帧率统计（按完整帧）受4线程共用影响并不准确 =====
-//                            usbFpsCount++;
-//                            const qint64 ms = signalTimer.elapsed();
-//                            if (ms >= 1000) {
-//                                const double fps = usbFpsCount * 1000.0 / double(ms);
-//                                emit usbFpsChanged(fps);
-//                                usbFpsCount = 0;
-//                                signalTimer.restart();
-//                                qDebug()<<"USBFps:"<<fps;
-//                            }
-                        }
-
-                    }
-                }
+                processReceivedBytes(buf[index], length);
 
                 reqNext = true;
             } else {
@@ -715,19 +473,10 @@ bufferAccess.acquire();
     }
 
     END:
-//    for (int i = 0; i < 2 * MAX_REQ_QUEUE; i++) {
-//        delete[] buf_1[i];
-//    }
     if (transBuf) {
         delete[] transBuf;
         transBuf = NULL;
 
-    }
-    index_cnt=0;
-    {
-        QMutexLocker assemblyLock(&frameAssemblyMutex);
-        if (frameAssemblyActiveThreads > 0)
-            --frameAssemblyActiveThreads;
     }
     //qDebug()<<"-----------------------------------------";
 }

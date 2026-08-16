@@ -13,6 +13,7 @@ CONFIG += resources_big
 SOURCES += \
     common/myCombox/comboxItem.cpp \
     common/myCombox/myCombox.cpp \
+    common/usb_frame_pipeline.cpp \
     gl_image_widget.cpp \
     image_processor.cpp \
     linearstretchcalibrationdialog.cpp \
@@ -21,6 +22,7 @@ SOURCES += \
     offline_replay_worker.cpp \
     serialworker.cpp \
     telemetrydebugdialog.cpp \
+    transfer_thread_common.cpp \
     uartprotocol.cpp \
     widget_image.cpp
 
@@ -39,6 +41,7 @@ HEADERS += \
     common/myCombox/comboxItem.h \
     common/myCombox/myCombox.h \
     common/tih_usb_device.h \
+    common/usb_frame_pipeline.h \
     common/usb_types.h \
     common/winusb_supp.h \
     gl_image_widget.h \

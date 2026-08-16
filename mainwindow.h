@@ -17,6 +17,7 @@
 #include "serialworker.h"
 
 #include <QImage>
+#include <memory>
 #include "qthread.h"
 #include <QButtonGroup>
 #include <QFileInfo>
@@ -152,6 +153,7 @@ private:
     } usbParam_t;
     tihUSBDevice   *usbSkeleton = NULL;
     transferThread *xferThread[8] = {NULL};
+    std::shared_ptr<swir::usb::FrameAssembler> m_usbFrameAssembler;
 
     myCombox *comboxDevice = NULL;
     QString currentDevice;

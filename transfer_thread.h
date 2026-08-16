@@ -6,9 +6,11 @@
 #include <QFile>
 #include <QMutex>
 #include "common/tih_usb_device.h"
+#include "common/usb_frame_pipeline.h"
 #include "common/usb_types.h"
 #include <QImage>
 #include <QElapsedTimer>
+#include <memory>
 class transferThread : public QThread
 {
     Q_OBJECT
@@ -19,7 +21,8 @@ public:
         DATA_PATTERN_CONSTANT
     };
 
-    transferThread(tihUSBDevice *dev, bool check, bool mode);
+    transferThread(tihUSBDevice *dev, bool check, bool mode,
+                   std::shared_ptr<swir::usb::FrameAssembler> frameAssembler = {});
     ~transferThread();
     void setUsbPipe(uint8_t id, UsbPipeType type);
     void setDataPattern(uint32_t type, uint32_t size);
@@ -27,13 +30,8 @@ public:
 
     void stop();
     /***************************************************/
-    void setFrameSpec(int w, int h, int headerBytes = 16, int bytesPerPixel = 2) {
-        frameWidth = w;
-        frameHeight = h;
-        frameHeader = headerBytes;
-        pixelBytes  = bytesPerPixel;
-        emit specChanged(frameWidth, frameHeight, pixelBytes);
-    }
+    void setFrameSpec(int w, int h, int headerBytes = 16,
+                      int bytesPerPixel = 2);
     // === 数据流保存的全局开关 ===
     static void startStreamSave(const QString &fileName);
     static void stopStreamSave();
@@ -88,6 +86,10 @@ protected:
 
     bool stopFlag = false;
 
+    // 每个Bulk IN端点保留独立残包状态，四个端点共享同一个完整帧组装器。
+    swir::usb::RowStreamParser rowStreamParser;
+    std::shared_ptr<swir::usb::FrameAssembler> frameAssembler;
+
 
 
     /* ISO EP only */
@@ -101,6 +103,7 @@ protected:
 
     void isoTransfer();
     void bulkTransfer();
+    void processReceivedBytes(const std::uint8_t *data, std::size_t size);
 
     /* data check */
     uint32_t lastWord = 0, currentWord = 0;

@@ -7,8 +7,11 @@ QMutex transferThread::s_streamMutex;
 QFile transferThread::s_streamFile;
 bool transferThread::s_streamEnabled = false;
 
-transferThread::transferThread(tihUSBDevice *dev, bool check, bool mode)
-    : usbInterface(dev), dataCheckEnable(check), highSpeedModeEn(mode)
+transferThread::transferThread(
+    tihUSBDevice *dev, bool check, bool mode,
+    std::shared_ptr<swir::usb::FrameAssembler> sharedFrameAssembler)
+    : usbInterface(dev), dataCheckEnable(check), highSpeedModeEn(mode),
+      frameAssembler(std::move(sharedFrameAssembler))
 {
 }
 

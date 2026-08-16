@@ -1248,6 +1248,7 @@ void MainWindow::on_pushButton_start_clicked()
                 xferThread[i] = NULL;
             }
         }
+        m_usbFrameAssembler.reset();
 
 //        imgProc->stop();
 //        imgProc->quit();
@@ -1289,6 +1290,7 @@ void MainWindow::on_pushButton_start_clicked()
 //    //xferThread[i]->setStackSize(4096 * 1024);
 //    xferThread->setUsbPipe(pipeID, pipeType);
 //    xferThread->setDataPattern(dataType, dataSize);
+    m_usbFrameAssembler = std::make_shared<swir::usb::FrameAssembler>();
     for (int i = 4; i < CHANNELS_NUM; i++) {
 
         /* get Pipe IDS (EndPoints address) */
@@ -1305,7 +1307,8 @@ void MainWindow::on_pushButton_start_clicked()
         else
             continue;
 
-        xferThread[i] = new transferThread(usbSkeleton,0, hs);
+        xferThread[i] = new transferThread(usbSkeleton, 0, hs,
+                                           m_usbFrameAssembler);
         xferThread[i]->setStackSize(4096 * 1024);
         xferThread[i]->setUsbPipe(pipeID, pipeType);
         xferThread[i]->setDataPattern(dataType, dataSize);
