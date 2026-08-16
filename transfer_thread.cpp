@@ -490,8 +490,10 @@ void transferThread::run()
 
     mutex.lock();
     errLogFlag++;
-    if (!errFile.isOpen())
-        errFile.open(QIODevice::ReadWrite | QIODevice::Append);
+    if (!errFile.isOpen() &&
+        !errFile.open(QIODevice::ReadWrite | QIODevice::Append)) {
+        qWarning() << "USB错误日志打开失败：" << errFile.errorString();
+    }
     mutex.unlock();
 
     if (usbPipeType == UsbPipeType::Isochronous)

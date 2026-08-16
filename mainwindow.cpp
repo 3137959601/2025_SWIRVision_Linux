@@ -47,7 +47,8 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(&timer, SIGNAL(timeout()), this, SLOT(transferRate()));
     connect(&monitor, SIGNAL(timeout()), this, SLOT(timerMonitor()));
     loadXml();
-    speedFile.open(QIODevice::ReadWrite | QIODevice::Append);
+    if (!speedFile.open(QIODevice::ReadWrite | QIODevice::Append))
+        qWarning() << "速度日志打开失败：" << speedFile.errorString();
 
 
     // 初始设置
