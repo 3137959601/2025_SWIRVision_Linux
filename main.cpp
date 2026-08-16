@@ -65,8 +65,8 @@ int main(int argc, char *argv[])
             QTimer::singleShot(100, &a, [&a]() { a.exit(0); });
         });
         QObject::connect(&w, &MainWindow::offlineReplayEnded, &a,
-                         [&a, state, targetFrames](quint64, bool canceled) {
-            if (!state->failed && !canceled && targetFrames > 0 &&
+                         [&a, state, targetFrames](quint64, bool canceled, bool success) {
+            if (success && !state->failed && !canceled && targetFrames > 0 &&
                 state->processedCount < targetFrames) {
                 qCritical() << "OFFLINE_TEST_ERROR: 文件结束前未达到目标处理帧数";
                 a.exit(5);

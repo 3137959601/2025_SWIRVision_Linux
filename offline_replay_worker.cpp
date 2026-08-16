@@ -29,12 +29,12 @@ void OfflineReplayWorker::run()
         emit replayError(QStringLiteral("离线回放尺寸无效：%1x%2")
                              .arg(m_settings.width)
                              .arg(m_settings.height));
-        emit replayCompleted(0, false);
+        emit replayCompleted(0, false, false);
         return;
     }
     if (!(m_settings.framesPerSecond > 0.0) || m_settings.framesPerSecond > 1000.0) {
         emit replayError(QStringLiteral("离线回放帧率必须大于0且不超过1000 FPS"));
-        emit replayCompleted(0, false);
+        emit replayCompleted(0, false, false);
         return;
     }
 
@@ -43,14 +43,14 @@ void OfflineReplayWorker::run()
     if (!file.open(QIODevice::ReadOnly)) {
         emit replayError(QStringLiteral("无法打开离线RAW文件：%1；原因：%2")
                              .arg(m_settings.filePath, file.errorString()));
-        emit replayCompleted(0, false);
+        emit replayCompleted(0, false, false);
         return;
     }
     if (file.size() < frameBytes) {
         emit replayError(QStringLiteral("离线RAW文件不足一帧：文件%1字节，单帧需要%2字节")
                              .arg(file.size())
                              .arg(frameBytes));
-        emit replayCompleted(0, false);
+        emit replayCompleted(0, false, false);
         return;
     }
     if ((file.size() % frameBytes) != 0) {
@@ -58,7 +58,7 @@ void OfflineReplayWorker::run()
                              .arg(file.size())
                              .arg(frameBytes)
                              .arg(file.size() % frameBytes));
-        emit replayCompleted(0, false);
+        emit replayCompleted(0, false, false);
         return;
     }
 
@@ -74,13 +74,13 @@ void OfflineReplayWorker::run()
 
         if (file.atEnd()) {
             if (!m_settings.loop) {
-                emit replayCompleted(decodedFrames, false);
+                emit replayCompleted(decodedFrames, false, true);
                 return;
             }
             if (!file.seek(0)) {
                 emit replayError(QStringLiteral("离线RAW循环回放无法回到文件开头：%1")
                                      .arg(file.errorString()));
-                emit replayCompleted(decodedFrames, false);
+                emit replayCompleted(decodedFrames, false, false);
                 return;
             }
         }
@@ -90,7 +90,7 @@ void OfflineReplayWorker::run()
             emit replayError(QStringLiteral("离线RAW读取到不完整帧：期望%1字节，实际%2字节")
                                  .arg(frameBytes)
                                  .arg(frame.size()));
-            emit replayCompleted(decodedFrames, false);
+            emit replayCompleted(decodedFrames, false, false);
             return;
         }
 
@@ -99,5 +99,5 @@ void OfflineReplayWorker::run()
         QThread::msleep(intervalMs);
     }
 
-    emit replayCompleted(decodedFrames, true);
+    emit replayCompleted(decodedFrames, true, true);
 }

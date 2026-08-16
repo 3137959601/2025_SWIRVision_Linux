@@ -497,10 +497,10 @@ bool MainWindow::startOfflineReplayFile(const QString &filePath, int width, int 
             QMessageBox::critical(this, QStringLiteral("离线回放失败"), message);
     });
     connect(worker, &OfflineReplayWorker::replayCompleted, this,
-            [this](quint64 decodedFrames, bool canceled) {
+            [this](quint64 decodedFrames, bool canceled, bool success) {
         qInfo().noquote() << "OFFLINE_REPLAY_COMPLETED frames=" << decodedFrames
-                          << "canceled=" << canceled;
-        emit offlineReplayEnded(decodedFrames, canceled);
+                          << "canceled=" << canceled << "success=" << success;
+        emit offlineReplayEnded(decodedFrames, canceled, success);
     });
     connect(worker, &QThread::finished, this, [this, worker]() {
         if (m_offlineReplay == worker)

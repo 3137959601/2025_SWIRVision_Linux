@@ -28,7 +28,7 @@ public:
 signals:
     void frameDecoded(const QByteArray &frameBytes, quint64 frameIndex);
     void replayError(const QString &message);
-    void replayCompleted(quint64 decodedFrames, bool canceled);
+    void replayCompleted(quint64 decodedFrames, bool canceled, bool success);
 
 protected:
     void run() override;

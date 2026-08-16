@@ -92,7 +92,7 @@ public:
 signals:
     void offlineFrameProcessed(quint64 frameIndex);
     void offlineReplayFailed(const QString &message);
-    void offlineReplayEnded(quint64 decodedFrames, bool canceled);
+    void offlineReplayEnded(quint64 decodedFrames, bool canceled, bool success);
     //串口信号
     void open_serial_signal(QString com_name);
     void close_serial_signal();
