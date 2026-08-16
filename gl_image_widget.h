@@ -51,6 +51,7 @@ private:
     QWidget* watchedViewport = nullptr;  // 当前已安装过滤器的 viewport
 
     QOpenGLShaderProgram program;
+    bool glReady = false;
     GLuint tex = 0;
     GLuint vao = 0, vbo = 0;
 

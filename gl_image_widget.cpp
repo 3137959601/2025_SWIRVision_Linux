@@ -111,6 +111,11 @@ bool computeFixedRoiMeanDn(const QImage& img, double& meanDn)
 }
 
 GLImageWidget::GLImageWidget(QWidget* p) : QOpenGLWidget(p) {
+    QSurfaceFormat requestedFormat;
+    requestedFormat.setVersion(3, 3);
+    requestedFormat.setProfile(QSurfaceFormat::CoreProfile);
+    setFormat(requestedFormat);
+
     setMinimumSize(64, 64);
     setAutoFillBackground(false);
     setFocusPolicy(Qt::StrongFocus);
@@ -122,6 +127,7 @@ GLImageWidget::GLImageWidget(QWidget* p) : QOpenGLWidget(p) {
 }
 
 GLImageWidget::~GLImageWidget() {
+    if (!glReady) return;
     makeCurrent();                          // 绑定当前 OpenGL 上下文
     if (vbo) glDeleteBuffers(1, &vbo);      // 删除顶点缓冲对象（VBO）
     if (vao) glDeleteVertexArrays(1, &vao); // 删除顶点数组对象（VAO）
@@ -151,7 +157,12 @@ void GLImageWidget::setImageSpec(int w, int h, int bits) {
 }
 
 void GLImageWidget::initializeGL() {
-    initializeOpenGLFunctions();
+    glReady = initializeOpenGLFunctions();
+    if (!glReady) {
+        qCritical() << "无法初始化 OpenGL 3.3 Core 函数，实际上下文格式："
+                    << context()->format();
+        return;
+    }
 
     // 顶点缓冲：一个覆盖全屏的矩形（两个三角形）
     static const float quad[] = {
@@ -240,13 +251,14 @@ void GLImageWidget::resizeGL(int /*w*/, int /*h*/) {
 
     viewW = fbW;
     viewH = fbH;
-    glViewport(0, 0, fbW, fbH);
+    if (glReady) glViewport(0, 0, fbW, fbH);
     updateMinZoomFit();
     if (zoom < minZoomFit) zoom = minZoomFit;
     clampOffset(); // 视窗改变时，限制偏移
 }
 
 void GLImageWidget::ensureTexture() {
+    if (!glReady) return;
     if (!tex) glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
 
@@ -272,6 +284,7 @@ void GLImageWidget::ensureTexture() {
 }
 
 void GLImageWidget::paintGL() {
+    if (!glReady) return;
     glClearColor(0,0,0,1);  //背景为黑色
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -352,6 +365,10 @@ void GLImageWidget::repaintFromRaw16(const void* ptr, int w, int h) {
     if (!ptr || w<=0 || h<=0) return;
     if (w!=imgW || h!=imgH || imgBits!=16) {
         imgW=w; imgH=h; imgBits=16; specDirty=true;
+    }
+    if (!glReady) {
+        update();
+        return;
     }
     makeCurrent();
     ensureTexture();
