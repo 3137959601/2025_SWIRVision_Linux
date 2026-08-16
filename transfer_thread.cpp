@@ -140,7 +140,7 @@ void transferThread::setIsoInfo(uint32_t nbytes, uint32_t interval)
     isoInterval = interval;
 }
 
-void transferThread::setUsbPipe(uint8_t id, USBD_PIPE_TYPE type)
+void transferThread::setUsbPipe(uint8_t id, UsbPipeType type)
 {
     usbPipeID = id;
     usbPipeType = type;
@@ -745,7 +745,7 @@ void transferThread::run()
         errFile.open(QIODevice::ReadWrite | QIODevice::Append);
     mutex.unlock();
 
-    if (usbPipeType == UsbdPipeTypeIsochronous)
+    if (usbPipeType == UsbPipeType::Isochronous)
         isoTransfer();
     else
         bulkTransfer();

@@ -69,7 +69,7 @@ void tihUSBDevice::close()
     }
 }
 
-QList<WINUSB_PIPE_INFORMATION_EX> tihUSBDevice::endPoints()
+QList<UsbEndpointInfo> tihUSBDevice::endPoints() const
 {
     return epList;
 }

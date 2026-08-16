@@ -5,8 +5,8 @@
 #include <QThread>
 #include <QFile>
 #include <QMutex>
-#include <Windows.h>
 #include "common/tih_usb_device.h"
+#include "common/usb_types.h"
 #include <QImage>
 #include <QElapsedTimer>
 class transferThread : public QThread
@@ -21,7 +21,7 @@ public:
 
     transferThread(tihUSBDevice *dev, bool check, bool mode);
     ~transferThread();
-    void setUsbPipe(uint8_t id, USBD_PIPE_TYPE type);
+    void setUsbPipe(uint8_t id, UsbPipeType type);
     void setDataPattern(uint32_t type, uint32_t size);
     void setIsoInfo(uint32_t nbytes, uint32_t interval);
 
@@ -79,7 +79,7 @@ protected:
     bool dataCheckEnable = false;
     bool highSpeedModeEn = false;
     uint8_t usbPipeID;
-    USBD_PIPE_TYPE usbPipeType;
+    UsbPipeType usbPipeType = UsbPipeType::Unknown;
 
     uint32_t transferPackSize;
     uint32_t transferDataType;
@@ -93,7 +93,11 @@ protected:
     /* ISO EP only */
     uint32_t isoNbytes = 0;
     uint32_t isoInterval = 0;
-    HANDLE   isoHandle = INVALID_HANDLE_VALUE;
+#ifdef Q_OS_WIN
+    HANDLE isoHandle = INVALID_HANDLE_VALUE;
+#else
+    void *isoHandle = nullptr;
+#endif
 
     void isoTransfer();
     void bulkTransfer();

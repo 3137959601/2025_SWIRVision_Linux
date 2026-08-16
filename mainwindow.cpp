@@ -869,8 +869,8 @@ void MainWindow::clearSatus()
 }
 void MainWindow::on_pushButton_connect_clicked()
 {
-    QList <WINUSB_PIPE_INFORMATION_EX> epList;
-    WINUSB_PIPE_INFORMATION_EX ep;
+    QList<UsbEndpointInfo> epList;
+    UsbEndpointInfo ep;
     QString  epDisInfo;
 
     currentDevice = comboxDevice->currentText();
@@ -901,14 +901,14 @@ void MainWindow::on_pushButton_connect_clicked()
         epDisInfo.clear();
 
         /* show endpoint type exclude control endpoint */
-        switch (ep.PipeType) {
-        case UsbdPipeTypeBulk:
+        switch (ep.pipeType) {
+        case UsbPipeType::Bulk:
             epDisInfo.append("BULK ");
             break;
-        case UsbdPipeTypeInterrupt:
+        case UsbPipeType::Interrupt:
             epDisInfo.append(" INT ");
             break;
-        case UsbdPipeTypeIsochronous:
+        case UsbPipeType::Isochronous:
             epDisInfo.append(" ISO ");
             break;
         default:
@@ -916,20 +916,20 @@ void MainWindow::on_pushButton_connect_clicked()
             break;
         }
 
-        if (ep.PipeId & 0x80)
+        if (ep.address & 0x80)
             epDisInfo.append(" IN: ");
         else
             epDisInfo.append("OUT: ");
 
         /* show endpoint address */
-        epDisInfo.append(QString("0x%1").arg(ep.PipeId, 2, 16, QChar('0')));
+        epDisInfo.append(QString("0x%1").arg(ep.address, 2, 16, QChar('0')));
 
         /* show max packet size */
-        epDisInfo.append("; MaxPacketSize = " + QString::number(ep.MaximumPacketSize));
+        epDisInfo.append("; MaxPacketSize = " + QString::number(ep.maximumPacketSize));
 
         /* if EP is ISO: show maxPacketInterval */
-        if (ep.PipeType == UsbdPipeTypeIsochronous) {
-            if (ep.MaximumBytesPerInterval == 0 || ep.Interval == 0) {
+        if (ep.pipeType == UsbPipeType::Isochronous) {
+            if (ep.maximumBytesPerInterval == 0 || ep.interval == 0) {
                 /* if information error; clear all EP that already listed */
                 QMessageBox::warning(this,
                                      "ISO EP Information",
@@ -941,8 +941,8 @@ void MainWindow::on_pushButton_connect_clicked()
                 return;
             }
             epDisInfo.append(QString("; MaxNbytes/Interval = %1/%2")
-                             .arg(ep.MaximumBytesPerInterval)
-                             .arg(ep.Interval));
+                             .arg(ep.maximumBytesPerInterval)
+                             .arg(ep.interval));
         }
 
         if (i < 8)
@@ -1000,7 +1000,7 @@ void MainWindow::on_pushButton_start_clicked()
 {
 
     uint8_t pipeID;
-    USBD_PIPE_TYPE pipeType;
+    UsbPipeType pipeType = UsbPipeType::Unknown;
     //uint32_t nbytes, interval;
     bool ok;
     uint32_t dataType;
@@ -1067,11 +1067,11 @@ void MainWindow::on_pushButton_start_clicked()
             continue;
 
         if (ledit_eps[i].text().left(4) == "BULK")
-            pipeType = UsbdPipeTypeBulk;
+            pipeType = UsbPipeType::Bulk;
         else if (ledit_eps[i].text().left(4) == " INT")
-            pipeType = UsbdPipeTypeInterrupt;
+            pipeType = UsbPipeType::Interrupt;
         else if (ledit_eps[i].text().left(4) == " ISO")
-            pipeType = UsbdPipeTypeIsochronous;
+            pipeType = UsbPipeType::Isochronous;
         else
             continue;
 
