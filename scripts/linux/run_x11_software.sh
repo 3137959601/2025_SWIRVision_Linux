@@ -37,4 +37,5 @@ export LIBGL_ALWAYS_SOFTWARE=1
 
 echo "显示会话：$DISPLAY"
 echo "启动程序：$binary"
+cd "$(dirname -- "$binary")"
 exec "$binary"
