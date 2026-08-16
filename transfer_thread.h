@@ -10,7 +10,14 @@
 #include "common/usb_types.h"
 #include <QImage>
 #include <QElapsedTimer>
+#include <atomic>
 #include <memory>
+#ifdef Q_OS_LINUX
+#include <condition_variable>
+#include <mutex>
+#include <vector>
+struct libusb_transfer;
+#endif
 class transferThread : public QThread
 {
     Q_OBJECT
@@ -84,11 +91,19 @@ protected:
 
     uchar *transBuf;
 
-    bool stopFlag = false;
+    std::atomic_bool stopFlag{false};
 
     // 每个Bulk IN端点保留独立残包状态，四个端点共享同一个完整帧组装器。
     swir::usb::RowStreamParser rowStreamParser;
     std::shared_ptr<swir::usb::FrameAssembler> frameAssembler;
+
+#ifdef Q_OS_LINUX
+    std::mutex linuxTransferMutex;
+    std::condition_variable linuxTransferFinished;
+    std::vector<libusb_transfer *> linuxTransfers;
+    std::size_t linuxActiveTransfers = 0;
+    static void linuxTransferCallback(libusb_transfer *transfer);
+#endif
 
 
 

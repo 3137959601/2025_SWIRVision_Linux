@@ -4,11 +4,17 @@
 #include <QList>
 #include <QDebug>
 #include "usb_types.h"
+#include <memory>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <winusb.h>
 #include <winusbio.h>
+#endif
+
+#ifdef Q_OS_LINUX
+struct libusb_device_handle;
+struct LinuxUsbState;
 #endif
 
 class tihUSBDevice
@@ -22,6 +28,7 @@ public:
     void close();
 
     bool reboot();
+    QString lastError() const { return errorString; }
 
     QList<UsbEndpointInfo> endPoints() const;
 
@@ -38,6 +45,8 @@ public:
                     ULONG packs,
                     PUSBD_ISO_PACKET_DESCRIPTOR sta,
                     LPOVERLAPPED ov);
+#elif defined(Q_OS_LINUX)
+    libusb_device_handle *nativeHandle() const;
 #endif
 private:
 #ifdef Q_OS_WIN
@@ -74,8 +83,10 @@ private:
     HANDLE deviceHandle;
 #else
     bool opened = false;
+    std::unique_ptr<LinuxUsbState> linuxState;
 #endif
     QString devicePath;
+    QString errorString;
 
     QList<UsbEndpointInfo> epList;
 };

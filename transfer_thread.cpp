@@ -15,8 +15,8 @@
 #define MAX_REQ_QUEUE    64     //256
 #endif
 
-extern uint64_t volatile g_transOk;
-extern uint64_t volatile g_transErr;
+extern std::atomic_uint64_t g_transOk;
+extern std::atomic_uint64_t g_transErr;
 static QMutex mutex;
 
 QFile errFile("./err_log.txt");
@@ -379,8 +379,8 @@ void transferThread::bulkTransfer()
 //                QString USBPipeID_dec=QString::number(usbPipeID,16);
 //                qDebug()<<"USBPipeID："<<USBPipeID_dec<<"index:"<<index<<"index_cnt："<<index_cnt<<"buf[0][0]:"<<buf[0][0];
 
-                g_transOk += transfered;
-                g_transErr += (transferPackSize - transfered);
+                g_transOk.fetch_add(transfered);
+                g_transErr.fetch_add(transferPackSize - transfered);
                 length=transfered;
                 // === 如果开启了数据流保存，就把这一包原始USB数据写进去 ===
                 if (s_streamEnabled) {
@@ -402,7 +402,7 @@ void transferThread::bulkTransfer()
                                       .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd[hh:mm:ss.zzz]"))
                                       .arg(errCode).arg(transferPackSize).arg(transfered).arg(index).toLatin1());
                         errFile.flush();
-                        g_transErr += (transferPackSize - transfered);
+                        g_transErr.fetch_add(transferPackSize - transfered);
                         reqNext = true;
                     } else{
                         //usleep(1); // cpu利用率 换 数据收发速率

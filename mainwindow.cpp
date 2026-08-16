@@ -16,11 +16,12 @@
 #include <QMenuBar>
 #include <QToolBar>
 #include <limits>
+#include <atomic>
 
 #define AVERAGE_POLL_SIZE   10
 #define CHANNELS_NUM 8
-uint64_t volatile g_transOk = 0;
-uint64_t volatile g_transErr = 0;
+std::atomic_uint64_t g_transOk{0};
+std::atomic_uint64_t g_transErr{0};
 bool volatile end_flag=true;
 uint64_t s_ms[AVERAGE_POLL_SIZE] = {0};
 uint32_t s_ms_idx = 0;
@@ -1205,7 +1206,7 @@ void MainWindow::transferRate()
         s_ms[s_ms_idx] = ms;
 
         s_nbytes_idx = (s_nbytes_idx + 1) % AVERAGE_POLL_SIZE;
-        s_nbytes[s_nbytes_idx] = g_transOk;
+        s_nbytes[s_nbytes_idx] = g_transOk.load();
 
         msInterval = s_ms[s_ms_idx] - s_ms[(s_ms_idx + 1) % AVERAGE_POLL_SIZE];
         dataInterval = s_nbytes[s_nbytes_idx] - s_nbytes[(s_nbytes_idx + 1) % AVERAGE_POLL_SIZE];
