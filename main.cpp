@@ -35,17 +35,25 @@ int main(int argc, char *argv[])
             return 2;
         }
 
-        auto *processedCount = new int(0);
+        struct OfflineCliState {
+            int processedCount = 0;
+            bool failed = false;
+        };
+        auto *state = new OfflineCliState;
         QObject::connect(&w, &MainWindow::offlineReplayFailed, &a,
-                         [&a](const QString &) { a.exit(3); });
+                         [&a, state](const QString &) {
+            state->failed = true;
+            a.exit(3);
+        });
         QObject::connect(&w, &MainWindow::offlineFrameProcessed, &a,
-                         [&a, &w, processedCount, targetFrames, savePath](quint64 frameIndex) {
-            ++(*processedCount);
+                         [&a, &w, state, targetFrames, savePath](quint64 frameIndex) {
+            ++state->processedCount;
             qInfo().noquote() << "OFFLINE_TEST_FRAME index=" << frameIndex
-                              << "processed=" << *processedCount;
-            if (targetFrames <= 0 || *processedCount < targetFrames)
+                              << "processed=" << state->processedCount;
+            if (targetFrames <= 0 || state->processedCount < targetFrames)
                 return;
             if (!savePath.isEmpty() && !w.saveCurrentFrame(savePath)) {
+                state->failed = true;
                 qCritical().noquote() << "OFFLINE_TEST_ERROR: 保存处理帧失败：" << savePath;
                 w.stopOfflineReplay();
                 a.exit(4);
@@ -57,14 +65,15 @@ int main(int argc, char *argv[])
             QTimer::singleShot(100, &a, [&a]() { a.exit(0); });
         });
         QObject::connect(&w, &MainWindow::offlineReplayEnded, &a,
-                         [&a, processedCount, targetFrames](quint64, bool canceled) {
-            if (!canceled && targetFrames > 0 && *processedCount < targetFrames) {
+                         [&a, state, targetFrames](quint64, bool canceled) {
+            if (!state->failed && !canceled && targetFrames > 0 &&
+                state->processedCount < targetFrames) {
                 qCritical() << "OFFLINE_TEST_ERROR: 文件结束前未达到目标处理帧数";
                 a.exit(5);
             }
         });
         QObject::connect(&a, &QCoreApplication::aboutToQuit, &a,
-                         [processedCount]() { delete processedCount; });
+                         [state]() { delete state; });
 
         QTimer::singleShot(0, &w, [&w, &a, offlineFile, width, height, fps, &parser]() {
             if (!w.startOfflineReplayFile(offlineFile, width, height, fps,
