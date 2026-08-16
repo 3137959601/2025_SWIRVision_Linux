@@ -104,7 +104,7 @@ echo $?
 
 目前已经证明Qt GUI可以在X11和Mesa软件OpenGL下运行，不要求硬件GPU加速；也已经用合成RAW完成“文件读取—共享原始帧—`ImageProcessor`—OpenGL显示—RAW/PNG保存—停止”的离线闭环。当前图像控件仍调用OpenGL API，因此“软件OpenGL”不等于“完全不使用OpenGL”。
 
-尚未完成的是Linux USB后端、T630真机采集、串口真机回归和持续性能测试。离线数据是确定性合成梯度，不是T630实采数据，不能把本节结果表述为USB迁移成功。
+Linux USB后端已使用libusb 1.0.29实现，跨平台行包解析、四线程组帧、无模组枚举、取消与错误路径已经通过软件测试；Qt SerialPort也已通过伪终端端到端回归。尚未完成的是T630真机采集、串口真机回归和持续性能测试。离线数据是确定性合成梯度，不是T630实采数据，因此当前结论是“无模组软件移植完成”，不能写成“硬件链路验收成功”。
 
 ## 7. 离线RAW格式与为什么采用该格式
 
@@ -185,3 +185,145 @@ XAUTHORITY=/run/user/1000/gdm/Xauthority \
 - 短时2048×2048测试只能证明功能正确，不能代表持续帧率和内存上限。
 - 未加载真实NUC、坏点等标定数据时，只能验证处理线程与默认处理路径，不代表所有算法参数已完成回归。
 - Mesa软件OpenGL已能显示；是否需要硬件加速必须用持续帧率、CPU和显示刷新数据判断。
+
+## 11. USB协议、libusb和串口软件回归
+
+一键执行当前全部无模组软件测试：
+
+```bash
+cd /home/d508/projects/2025_SWIRVision_Linux
+DISPLAY=:0 \
+XAUTHORITY=/run/user/1000/gdm/Xauthority \
+  bash scripts/linux/test_all_x86_64.sh
+```
+
+该脚本依次验证：
+
+- USB行包在每个字节位置切分时仍能恢复完整行；
+- 噪声、非法头、乱序、重复行、三帧窗口和16位帧号回绕；
+- 四个线程并发向共享组帧器送行时的数据一致性；
+- UART纯协议与线性拉伸数学；
+- Qt SerialPort通过Linux伪终端写出命令、读入40字节遥测并完成解析；
+- libusb枚举现有设备、T630未连接和非法参数路径；
+- 2048×2048离线图像处理、显示和保存。
+
+分别执行的关键命令：
+
+```bash
+bash scripts/linux/test_usb_frame_pipeline.sh
+bash scripts/linux/test_qt_protocols.sh
+bash scripts/linux/test_libusb_enumeration.sh
+DISPLAY=:0 XAUTHORITY=/run/user/1000/gdm/Xauthority \
+  bash scripts/linux/test_offline_replay.sh debug
+```
+
+只读枚举指定VID/PID：
+
+```bash
+envp="$HOME/.local/share/codex-envs/400w-qt-linux-v2"
+export LD_LIBRARY_PATH="$envp/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export QT_QPA_PLATFORM=offscreen
+build/x86_64-release/SWIRVision --usb-list 706d:807c
+echo $?
+```
+
+输出`USB_LIST_COUNT ... count=0`且退出0表示查询成功但没有设备，不是程序错误；连接T630后应至少为1，并列出`libusb://BBB/DDD?...`URI。
+
+## 12. 生成和使用x86_64运行包
+
+```bash
+cd /home/d508/projects/2025_SWIRVision_Linux
+bash -n scripts/linux/package_x86_64.sh
+bash scripts/linux/package_x86_64.sh release
+sha256sum -c build/package/SWIRVision-linux-x86_64.tar.gz.sha256
+```
+
+产物为：
+
+```text
+build/package/SWIRVision-linux-x86_64/
+build/package/SWIRVision-linux-x86_64.tar.gz
+build/package/SWIRVision-linux-x86_64.tar.gz.sha256
+```
+
+直接运行：
+
+```bash
+cd build/package/SWIRVision-linux-x86_64
+./运行_SWIRVision.sh
+./运行_SWIRVision.sh --usb-list 706d:807c
+```
+
+默认启用软件OpenGL，原因是Ubuntu虚拟机不保证有可用GPU直通。若目标机已经有正常桌面硬件OpenGL，可显式尝试：
+
+```bash
+SWIR_OPENGL_MODE=desktop ./运行_SWIRVision.sh
+```
+
+打包脚本递归收集可执行文件和所选Qt插件在隔离环境中的动态库，不复制glibc和ELF动态加载器。这样可以避免替换目标系统最基础的ABI组件，但也意味着目标机应是兼容的x86_64 Linux；当前只在Ubuntu 20.04.6虚拟机验证，跨发行版兼容不能自动推定。
+
+## 13. T630连接后的验收顺序
+
+先执行只读检查，不要一上来修改权限：
+
+```bash
+lsusb -d 706d:807c
+lsusb -t
+lsusb -d 706d:807c -v | tee build/t630-lsusb-descriptor.txt
+QT_QPA_PLATFORM=offscreen \
+  build/package/SWIRVision-linux-x86_64/运行_SWIRVision.sh \
+  --usb-list 706d:807c | tee build/t630-usb-list.txt
+```
+
+重点确认：
+
+- VID/PID是否确实为`706d:807c`；如不同，以`lsusb`实测值为准，不能硬改设备假装识别。
+- `lsusb -t`是否显示`5000M`或更高，而不是`480M`；USB 2.0链路无法代表Windows USB 3.0性能基线。
+- 接口0/altsetting 0是否存在四个Bulk IN端点；若描述符不同，应修改端点发现策略并记录实际描述符。
+- 普通用户是否能打开`/dev/bus/usb/BBB/DDD`。
+
+然后在GUI中按“检索设备 → 连接 → 开始传输 → 停止传输”的顺序短测，观察完整帧、丢行/丢帧和错误日志。不要把“设备能枚举”写成“采集成功”；至少需要看到完整帧并能安全停止。
+
+如果日志明确出现`LIBUSB_ERROR_ACCESS`，才需要用户在Ubuntu终端执行以下`sudo`命令。先确认系统存在`plugdev`组：
+
+```bash
+getent group plugdev
+```
+
+存在时创建最小范围udev规则：
+
+```bash
+printf '%s\n' 'SUBSYSTEM=="usb", ATTR{idVendor}=="706d", ATTR{idProduct}=="807c", MODE="0660", GROUP="plugdev", TAG+="uaccess"' | \
+  sudo tee /etc/udev/rules.d/70-swir-t630.rules >/dev/null
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+随后拔下并重新插入T630，再检查权限和枚举：
+
+```bash
+ls -l /dev/bus/usb/BBB/DDD
+QT_QPA_PLATFORM=offscreen \
+  build/package/SWIRVision-linux-x86_64/运行_SWIRVision.sh --usb-list 706d:807c
+```
+
+其中`BBB/DDD`必须替换为程序URI或`lsusb`给出的实际三位总线号和设备号。规则使用`0660`而不是`0666`，只授权桌面活跃用户/plugdev组，避免向所有用户开放设备。若`plugdev`组不存在，先停止，不要照抄规则；应根据该虚拟机的实际用户组生成规则。
+
+串口验收前先确认模组接口是3.3 V TTL、RS-232还是RS-485，并使用匹配的转换器；电气制式不明确时禁止直接连接。确认后记录：
+
+```bash
+ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
+dmesg --ctime | tail -100
+```
+
+普通用户若出现串口权限错误，再执行一次：
+
+```bash
+sudo usermod -aG dialout "$USER"
+```
+
+该组变更需要注销并重新登录后生效。不要用`sudo`直接启动GUI作为长期方案，否则会造成配置文件属主和显示授权问题。
+
+## 14. 当前阶段门槛
+
+Ubuntu x86_64的无模组软件实现、自动回归和运行包已经完成。当前必须等待T630硬件连接；只有USB真实采集、停止/重连和串口控制通过后，才进入RK3588 ARM64移植。RK3588和EVS在此之前不继续修改。
