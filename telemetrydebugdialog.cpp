@@ -16,6 +16,7 @@
 #include <QStringList>
 #include <QTextStream>
 #include <QTimer>
+#include <QVector>
 #include <QVBoxLayout>
 
 namespace {
@@ -51,6 +52,70 @@ QString tecMonitorText(quint16 rawMillivolts, bool powerEnabled)
     return QStringLiteral("%1 ℃ (%2 V)")
         .arg(UartProtocol::tecVoltageToTemperature(voltage), 0, 'f', 2)
         .arg(voltage, 0, 'f', 3);
+}
+
+const QVector<quint16> &fpgaLevelWeights(int levelCount)
+{
+    // 与FPGA auto_inttime.v中的Q12 level_weight完全一致。
+    static const QVector<quint16> weights20 {
+        0, 10, 25, 43, 66, 95, 132, 180, 240, 316,
+        416, 542, 703, 908, 1169, 1502, 1925, 2467, 3158, 4095
+    };
+    static const QVector<quint16> weights28 {
+        0, 22, 42, 64, 89, 119, 153, 191, 235, 287, 345, 411, 491, 578,
+        677, 794, 917, 1069, 1232, 1420, 1632, 1864, 2139, 2428,
+        2782, 3141, 3618, 4095
+    };
+    static const QVector<quint16> weights32 {
+        0, 19, 37, 55, 76, 99, 125, 156, 190, 228, 271, 317, 375, 437,
+        507, 585, 671, 770, 876, 1001, 1132, 1287, 1450, 1640,
+        1841, 2073, 2326, 2606, 2921, 3260, 3680, 4095
+    };
+
+    if (levelCount == 20)
+        return weights20;
+    if (levelCount == 28)
+        return weights28;
+    return weights32;
+}
+
+quint16 fpgaIntegrationTime(quint16 minRaw, quint16 maxRaw,
+                            int level, const QVector<quint16> &weights)
+{
+    if (maxRaw <= minRaw || level <= 0)
+        return minRaw;
+    if (level >= weights.size() - 1)
+        return maxRaw;
+
+    const quint32 range = quint32(maxRaw - minRaw);
+    return quint16(minRaw + ((range * weights.at(level) + 2047u) >> 12));
+}
+
+QString recommendedCalibrationText(double minimumMs, double maximumMs, int levelCount)
+{
+    const quint16 minRaw = quint16(qRound(minimumMs * 100.0));
+    const quint16 maxRaw = quint16(qRound(maximumMs * 100.0));
+    if (maxRaw < minRaw)
+        return QStringLiteral("推荐：范围无效");
+
+    const QVector<quint16> &weights = fpgaLevelWeights(levelCount);
+    QStringList values;
+    const int tableCount = levelCount / 4;
+    for (int table = 0; table < tableCount; ++table) {
+        // 每张两点表覆盖4档。取中间两档的积分时间中心作为标定值，
+        // 避免使用相邻表的边界，同时完整遵循FPGA的Q12曲线和舍入方式。
+        const int firstMiddleLevel = table * 4 + 1;
+        const int secondMiddleLevel = table * 4 + 2;
+        const quint16 firstTime = fpgaIntegrationTime(minRaw, maxRaw,
+                                                       firstMiddleLevel, weights);
+        const quint16 secondTime = fpgaIntegrationTime(minRaw, maxRaw,
+                                                        secondMiddleLevel, weights);
+        const quint16 calibrationTime = quint16((quint32(firstTime) + secondTime + 1u) / 2u);
+        values << QStringLiteral("T%1=%2")
+                  .arg(table + 1)
+                  .arg(calibrationTime / 100.0, 0, 'f', 2);
+    }
+    return QStringLiteral("推荐标定(ms)：%1").arg(values.join(QStringLiteral("  ")));
 }
 
 } // namespace
@@ -172,6 +237,21 @@ QWidget *TelemetryDebugDialog::buildCommandPanel()
             emitCommand(command, quint8(payload >> 16), quint16(payload));
         });
         layout->addWidget(setAutoRange, row, 3);
+        auto *recommendation = new QLabel(panel);
+        recommendation->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        recommendation->setWordWrap(true);
+        recommendation->setToolTip(QStringLiteral(
+            "每张两点表覆盖4个自动积分档位；推荐值取中间两档积分时间的中心。"));
+        layout->addWidget(recommendation, row, 4, 1, 2);
+        AutoRangeWidgets widgets;
+        widgets.minimum = autoMin;
+        widgets.maximum = autoMax;
+        widgets.recommendation = recommendation;
+        m_autoRangeWidgets.insert(command, widgets);
+        connect(autoMin, qOverload<double>(&QDoubleSpinBox::valueChanged),
+                this, [this](double) { updateRecommendedCalibrationTimes(); });
+        connect(autoMax, qOverload<double>(&QDoubleSpinBox::valueChanged),
+                this, [this](double) { updateRecommendedCalibrationTimes(); });
         finishRow();
     };
     addAutoRangeRow(QStringLiteral("低温范围(ms)"), 0x32, 1.00, 30.00);
@@ -375,12 +455,14 @@ QWidget *TelemetryDebugDialog::buildCommandPanel()
     legacyRegionPanel->setVisible(false);
     dualRegionPanel->setVisible(true);
     connect(m_regionLayoutMode, qOverload<int>(&QComboBox::currentIndexChanged), this,
-            [legacyRegionPanel, dualRegionPanel](int index) {
+            [this, legacyRegionPanel, dualRegionPanel](int index) {
         legacyRegionPanel->setVisible(index == 0);
         dualRegionPanel->setVisible(index == 1);
+        updateRecommendedCalibrationTimes();
     });
     layout->addWidget(legacyRegionPanel, row, 0, 1, 6);
     layout->addWidget(dualRegionPanel, row, 0, 1, 6);
+    updateRecommendedCalibrationTimes();
     finishRow();
 
     title(QStringLiteral("十字线"));
@@ -429,6 +511,33 @@ void TelemetryDebugDialog::emitCommand(quint8 code, quint8 control, quint16 valu
     if (code == 0x0B && control == 0xFF)
         notifyConfigSaveRequested();
     emit commandRequested(UartProtocol::makeCommand(code, control, value));
+}
+
+void TelemetryDebugDialog::updateRecommendedCalibrationTimes()
+{
+    const bool dualTemperatureLayout = m_regionLayoutMode &&
+                                       m_regionLayoutMode->currentIndex() == 1;
+
+    for (auto it = m_autoRangeWidgets.begin(); it != m_autoRangeWidgets.end(); ++it) {
+        AutoRangeWidgets &widgets = it.value();
+        if (!widgets.minimum || !widgets.maximum || !widgets.recommendation)
+            continue;
+
+        if (dualTemperatureLayout && it.key() == 0x32) {
+            widgets.recommendation->setText(QStringLiteral("双温区模式未使用此范围"));
+            continue;
+        }
+
+        // 三温区：低/中/高均为20档、5张表。
+        // 双温区：0x33对应15℃的32档/8张表，0x34对应40℃的28档/7张表。
+        const int levelCount = dualTemperatureLayout
+            ? (it.key() == 0x33 ? 32 : 28)
+            : 20;
+        widgets.recommendation->setText(
+            recommendedCalibrationText(widgets.minimum->value(),
+                                       widgets.maximum->value(),
+                                       levelCount));
+    }
 }
 
 void TelemetryDebugDialog::notifyConfigSaveRequested()

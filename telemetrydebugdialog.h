@@ -33,6 +33,7 @@ private:
     void emitCommand(quint8 code, quint8 control, quint16 value = 0);
     void setValue(const QString &key, const QString &value);
     void updateFlashStatus();
+    void updateRecommendedCalibrationTimes();
     void chooseCsvFile();
     void toggleCsv();
     void writeCsvRow(const TelemetryFrame &frame);
@@ -49,6 +50,14 @@ private:
     QSpinBox *m_histUpper = nullptr;
     QSpinBox *m_histLower = nullptr;
     QComboBox *m_regionLayoutMode = nullptr;
+
+    struct AutoRangeWidgets {
+        QDoubleSpinBox *minimum = nullptr;
+        QDoubleSpinBox *maximum = nullptr;
+        QLabel *recommendation = nullptr;
+    };
+    QHash<int, AutoRangeWidgets> m_autoRangeWidgets;
+
     QMultiHash<int, QPushButton*> m_regionButtons;
     QLineEdit *m_rawCommand = nullptr;
     QFile m_csvFile;

@@ -8,6 +8,8 @@
 #include "widget_image.h"
 //#define PACK_CONTINUE_CHECK
 #include <algorithm>
+#include <deque>
+#include <iterator>
 #include <vector>
 #include <QSemaphore>
 #include <QMutexLocker>
@@ -27,22 +29,37 @@ int errLogFlag = 0;
 
 // 全局变量声明
 uchar *buf_1[2*MAX_REQ_QUEUE];
-//unsigned short usb_pic[2048][2048];
-std::vector<uint16_t> usb_pic;
-
 int index_cnt=0;
 
 QMutex bufferMutex;  // 用于线程安全的互斥锁
 QSemaphore bufferAccess(1);  // 信号量初始值为 1，表示一个线程可以访问
 
-// 四个USB接收线程共同填充一帧。USB请求的完成顺序不等于FPGA发送顺序，
-// 因此不能在“收到最后一行”时直接发布，否则尚未到达的16KB块会保留上一帧数据。
-// 这里按frame_num记录当前组装帧，并逐行标记；2048行全部到齐后才允许显示。
+// 四个USB接收线程的完成顺序不等于FPGA发送顺序，相邻帧可能交错到达。
+// 同时保留三个帧槽，避免看到新帧号时直接丢弃上一帧尚未到达的行。
 QMutex frameAssemblyMutex;
-std::vector<uchar> frameRowReceived;
-int assemblingFrameNum = -1;
-int assembledRowCount = 0;
-bool assembledFramePublished = false;
+constexpr size_t kFrameAssemblySlots = 3;
+
+struct FrameAssemblySlot
+{
+    quint16 frameNum = 0;
+    std::vector<uint16_t> pixels;
+    std::vector<uchar> rowReceived;
+    int rowCount = 0;
+
+    FrameAssemblySlot(quint16 number, int width, int height)
+        : frameNum(number),
+          pixels(size_t(width) * size_t(height), uint16_t(0)),
+          rowReceived(size_t(height), uchar(0))
+    {
+    }
+};
+
+std::deque<FrameAssemblySlot> frameAssemblySlots;
+int frameAssemblyWidth = 0;
+int frameAssemblyHeight = 0;
+int newestReceivedFrameNum = -1;
+int lastPublishedFrameNum = -1;
+int frameAssemblyActiveThreads = 0;
 
 static bool isNewerFrameNumber(quint16 candidate, quint16 current)
 {
@@ -335,6 +352,18 @@ void transferThread::bulkTransfer()
     long errCode;
     uchar *buf[MAX_REQ_QUEUE];
 
+    {
+        QMutexLocker assemblyLock(&frameAssemblyMutex);
+        if (frameAssemblyActiveThreads == 0) {
+            frameAssemblySlots.clear();
+            frameAssemblyWidth = 0;
+            frameAssemblyHeight = 0;
+            newestReceivedFrameNum = -1;
+            lastPublishedFrameNum = -1;
+        }
+        ++frameAssemblyActiveThreads;
+    }
+
     OVERLAPPED ov[MAX_REQ_QUEUE];
     OVERLAPPED ovcmd[MAX_REQ_QUEUE];
 
@@ -413,7 +442,6 @@ void transferThread::bulkTransfer()
 
     //std::vector<uint16_t> merged_values;
 //    uint16_t merged_values[525584];
-    usb_pic.resize(size_t(frameWidth) * frameHeight);
 //     std::vector<ushort> usb_pic_temp;
 //     usb_pic_temp.resize(512 * 640);
 //    std::vector<std::vector<unsigned short>> usb_pic_temp(512, std::vector<unsigned short>(640));
@@ -478,53 +506,113 @@ bufferAccess.acquire();
                             QMutexLocker assemblyLock(&frameAssemblyMutex);
                             const quint16 rxFrame = quint16(frame_num);
                             const bool geometryChanged =
-                                usb_pic.size() != size_t(frameWidth) * frameHeight ||
-                                frameRowReceived.size() != size_t(frameHeight);
+                                frameAssemblyWidth != frameWidth ||
+                                frameAssemblyHeight != frameHeight;
 
                             if (geometryChanged) {
-                                usb_pic.assign(size_t(frameWidth) * frameHeight, uint16_t(0));
-                                frameRowReceived.assign(size_t(frameHeight), uchar(0));
-                                assemblingFrameNum = -1;
-                                assembledRowCount = 0;
-                                assembledFramePublished = false;
+                                frameAssemblySlots.clear();
+                                frameAssemblyWidth = frameWidth;
+                                frameAssemblyHeight = frameHeight;
+                                newestReceivedFrameNum = -1;
+                                lastPublishedFrameNum = -1;
                             }
 
-                            if (assemblingFrameNum < 0 ||
-                                isNewerFrameNumber(rxFrame, quint16(assemblingFrameNum))) {
-                                assemblingFrameNum = int(rxFrame);
-                                std::fill(frameRowReceived.begin(), frameRowReceived.end(), uchar(0));
-                                assembledRowCount = 0;
-                                assembledFramePublished = false;
-                            }
+                            // 已发布帧及更旧帧的迟到数据不再参与组帧，防止画面倒退。
+                            const bool frameAlreadyExpired =
+                                lastPublishedFrameNum >= 0 &&
+                                (rxFrame == quint16(lastPublishedFrameNum) ||
+                                 !isNewerFrameNumber(rxFrame,
+                                                     quint16(lastPublishedFrameNum)));
 
-                            // 只接收当前组装帧。上一帧迟到的数据不能覆盖新帧同一行。
-                            if (assemblingFrameNum == int(rxFrame)) {
-                                const size_t rowIndex = size_t(package_num - 1);
-                                uint16_t* dstRow = usb_pic.data() + rowIndex * frameWidth;
-                                memcpy(dstRow, &buffer_2[j + frameHeader],
-                                       size_t(frameWidth) * sizeof(uint16_t));
-
-                                if (!frameRowReceived[rowIndex]) {
-                                    frameRowReceived[rowIndex] = 1;
-                                    ++assembledRowCount;
+                            if (!frameAlreadyExpired) {
+                                if (newestReceivedFrameNum < 0 ||
+                                    isNewerFrameNumber(rxFrame,
+                                                       quint16(newestReceivedFrameNum))) {
+                                    newestReceivedFrameNum = int(rxFrame);
                                 }
 
-                                if (!assembledFramePublished &&
-                                    assembledRowCount == frameHeight) {
-                                    QMutexLocker imageLock(&widget_image::s_imgMutex);
-                                    uint16_t* dst = widget_image::rawPtr();
-                                    const int dstStridePx = widget_image::rawStridePx();
-                                    if (dst && dstStridePx >= frameWidth) {
-                                        for (int y = 0; y < frameHeight; ++y) {
-                                            const uint16_t* srcRow =
-                                                usb_pic.data() + size_t(y) * frameWidth;
-                                            memcpy(dst + size_t(y) * dstStridePx, srcRow,
-                                                   size_t(frameWidth) * sizeof(uint16_t));
+                                frameAssemblySlots.erase(
+                                    std::remove_if(
+                                        frameAssemblySlots.begin(),
+                                        frameAssemblySlots.end(),
+                                        [](const FrameAssemblySlot &slot) {
+                                            const quint16 age = quint16(
+                                                quint16(newestReceivedFrameNum) -
+                                                slot.frameNum);
+                                            return age >= quint16(
+                                                       kFrameAssemblySlots) &&
+                                                   age < 0x8000;
+                                        }),
+                                    frameAssemblySlots.end());
+
+                                // 只接受最新帧及其前两个相邻帧。更早的数据即使迟到，
+                                // 也不应挤掉仍在组装的有效帧。
+                                const quint16 age = quint16(
+                                    quint16(newestReceivedFrameNum) - rxFrame);
+                                const bool frameWithinWindow =
+                                    age < quint16(kFrameAssemblySlots);
+
+                                if (frameWithinWindow) {
+                                    auto slotIt = std::find_if(
+                                        frameAssemblySlots.begin(),
+                                        frameAssemblySlots.end(),
+                                        [rxFrame](const FrameAssemblySlot &slot) {
+                                            return slot.frameNum == rxFrame;
+                                        });
+
+                                    if (slotIt == frameAssemblySlots.end()) {
+                                        frameAssemblySlots.emplace_back(
+                                            rxFrame, frameWidth, frameHeight);
+                                        slotIt = std::prev(frameAssemblySlots.end());
+                                    }
+
+                                    const size_t rowIndex = size_t(package_num - 1);
+                                    uint16_t *dstRow = slotIt->pixels.data() +
+                                                       rowIndex * frameWidth;
+                                    memcpy(dstRow, &buffer_2[j + frameHeader],
+                                           size_t(frameWidth) * sizeof(uint16_t));
+
+                                    if (!slotIt->rowReceived[rowIndex]) {
+                                        slotIt->rowReceived[rowIndex] = 1;
+                                        ++slotIt->rowCount;
+                                    }
+
+                                    if (slotIt->rowCount == frameHeight) {
+                                        QMutexLocker imageLock(
+                                            &widget_image::s_imgMutex);
+                                        uint16_t *dst = widget_image::rawPtr();
+                                        const int dstStridePx =
+                                            widget_image::rawStridePx();
+                                        if (dst && dstStridePx >= frameWidth) {
+                                            for (int y = 0; y < frameHeight; ++y) {
+                                                const uint16_t *srcRow =
+                                                    slotIt->pixels.data() +
+                                                    size_t(y) * frameWidth;
+                                                memcpy(dst + size_t(y) * dstStridePx,
+                                                       srcRow,
+                                                       size_t(frameWidth) *
+                                                           sizeof(uint16_t));
+                                            }
+                                            lastPublishedFrameNum = int(rxFrame);
+                                            frameReady = true;
                                         }
-                                        assembledFramePublished = true;
-                                        frameReady = true;
                                     }
                                 }
+                            }
+
+                            if (frameReady) {
+                                // 发布后仅保留比当前显示帧更新的槽；当前帧和旧帧
+                                // 后续到达的重复行会由frameAlreadyExpired直接丢弃。
+                                frameAssemblySlots.erase(
+                                    std::remove_if(
+                                        frameAssemblySlots.begin(),
+                                        frameAssemblySlots.end(),
+                                        [rxFrame](const FrameAssemblySlot &slot) {
+                                            return slot.frameNum == rxFrame ||
+                                                   !isNewerFrameNumber(
+                                                       slot.frameNum, rxFrame);
+                                        }),
+                                    frameAssemblySlots.end());
                             }
                         }
                         j += (lookahead - 1);  // 跳过当前帧的头+载荷
@@ -636,6 +724,11 @@ bufferAccess.acquire();
 
     }
     index_cnt=0;
+    {
+        QMutexLocker assemblyLock(&frameAssemblyMutex);
+        if (frameAssemblyActiveThreads > 0)
+            --frameAssemblyActiveThreads;
+    }
     //qDebug()<<"-----------------------------------------";
 }
 
