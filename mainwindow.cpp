@@ -557,31 +557,38 @@ void MainWindow::initImageProcessing() {
         );
     };
     connect(sbGainMin,  QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [=](double v){
-        if (!imgProc) return; imgProc->setGainMin(v);
+        if (!imgProc) return;
+        imgProc->setGainMin(v);
         if (chkAutoRebuild->isChecked()) imgProc->rebuildBPM();
     });
     connect(sbGainMax,  QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [=](double v){
-        if (!imgProc) return; imgProc->setGainMax(v);
+        if (!imgProc) return;
+        imgProc->setGainMax(v);
         if (chkAutoRebuild->isChecked()) imgProc->rebuildBPM();
     });
     connect(sbDsnuAbs,  QOverload<int>::of(&QSpinBox::valueChanged), this, [=](int v){
-        if (!imgProc) return; imgProc->setDsnuAbs(v);
+        if (!imgProc) return;
+        imgProc->setDsnuAbs(v);
         if (chkAutoRebuild->isChecked()) imgProc->rebuildBPM();
     });
     connect(sbDsnuKmad, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [=](double v){
-        if (!imgProc) return; imgProc->setDsnuKmad(v);
+        if (!imgProc) return;
+        imgProc->setDsnuKmad(v);
         if (chkAutoRebuild->isChecked()) imgProc->rebuildBPM();
     });
     connect(sbLinResid, QOverload<int>::of(&QSpinBox::valueChanged), this, [=](int v){
-        if (!imgProc) return; imgProc->setLinResidualDN(v);
+        if (!imgProc) return;
+        imgProc->setLinResidualDN(v);
         if (chkAutoRebuild->isChecked()) imgProc->rebuildBPM();
     });
     connect(sbBlack,    QOverload<int>::of(&QSpinBox::valueChanged), this, [=](int v){
-        if (!imgProc) return; imgProc->setBlackThresh(v);
+        if (!imgProc) return;
+        imgProc->setBlackThresh(v);
         if (chkAutoRebuild->isChecked()) imgProc->rebuildBPM();
     });
     connect(sbWhite,    QOverload<int>::of(&QSpinBox::valueChanged), this, [=](int v){
-        if (!imgProc) return; imgProc->setWhiteThresh(v);
+        if (!imgProc) return;
+        imgProc->setWhiteThresh(v);
         if (chkAutoRebuild->isChecked()) imgProc->rebuildBPM();
     });
     connect(btnRebuild, &QPushButton::clicked, this, [=]{ sendAll(true); });
@@ -971,10 +978,10 @@ void MainWindow::transferRate()
 
     ms = QDateTime::currentMSecsSinceEpoch();
     if (1000 < (ms - s_ms[s_ms_idx])) {
-        s_ms_idx = (++s_ms_idx) % AVERAGE_POLL_SIZE;
+        s_ms_idx = (s_ms_idx + 1) % AVERAGE_POLL_SIZE;
         s_ms[s_ms_idx] = ms;
 
-        s_nbytes_idx = (++s_nbytes_idx) % AVERAGE_POLL_SIZE;
+        s_nbytes_idx = (s_nbytes_idx + 1) % AVERAGE_POLL_SIZE;
         s_nbytes[s_nbytes_idx] = g_transOk;
 
         msInterval = s_ms[s_ms_idx] - s_ms[(s_ms_idx + 1) % AVERAGE_POLL_SIZE];
