@@ -13,6 +13,7 @@
 #include "widget_image.h"
 #include "gl_image_widget.h"
 #include "image_processor.h"
+#include "offline_replay_worker.h"
 #include "serialworker.h"
 
 #include <QImage>
@@ -39,6 +40,7 @@
 #include <QRadioButton>
 #include <QLabel>
 #include <QSlider>
+#include <QAction>
 
 namespace Ui {
 class MainWindow;
@@ -53,6 +55,11 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
+    bool startOfflineReplayFile(const QString &filePath, int width, int height,
+                                double framesPerSecond, bool loop,
+                                int outputBits = 16, bool showDialogs = false);
+    void stopOfflineReplay();
+    bool saveCurrentFrame(const QString &filePath);
     QThread *thread1;
     QThread *thread2;
     ImageProcessor *imgProc = nullptr;
@@ -83,6 +90,9 @@ public:
     void on_FPGA_BlindPointDetect_sel();
     void on_FPGA_Enhance_sel(); //暂定为线性增强
 signals:
+    void offlineFrameProcessed(quint64 frameIndex);
+    void offlineReplayFailed(const QString &message);
+    void offlineReplayEnded(quint64 decodedFrames, bool canceled);
     //串口信号
     void open_serial_signal(QString com_name);
     void close_serial_signal();
@@ -131,6 +141,10 @@ private:
     void clearSatus();
     void xmlUnpack(QXmlStreamReader *xml, QString &head);
     void loadXml();
+    void setupOfflineReplayUi();
+    void selectOfflineReplayFile();
+    void startOfflineReplayFromUi();
+    void configureOfflineFrameBuffers(int width, int height, int outputBits);
 
     typedef struct usbParam {
         uint16_t vid;
@@ -209,6 +223,15 @@ private:
     QString m_streamSaveDir;
     QString m_imageSaveExt = "raw";
     bool m_streamSaving = false;
+    OfflineReplayWorker *m_offlineReplay = nullptr;
+    QString m_offlineReplayPath;
+    QAction *m_offlineChooseAction = nullptr;
+    QAction *m_offlineStartAction = nullptr;
+    QAction *m_offlineStopAction = nullptr;
+    QAction *m_offlineLoopAction = nullptr;
+    bool m_offlineFramePending = false;
+    quint64 m_pendingOfflineFrameIndex = 0;
+    bool m_offlineShowDialogs = false;
     TelemetryDebugDialog *m_telemetryDialog = nullptr;
     LinearStretchCalibrationDialog *m_linearStretchDialog = nullptr;
 

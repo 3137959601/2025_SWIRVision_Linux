@@ -9,6 +9,7 @@ case "$build_type" in
         exit 2
         ;;
 esac
+shift || true
 
 if [[ -z "${DISPLAY:-}" || -z "${XAUTHORITY:-}" ]]; then
     echo "必须显式设置 DISPLAY 和 XAUTHORITY，脚本不会猜测桌面会话。" >&2
@@ -38,4 +39,4 @@ export LIBGL_ALWAYS_SOFTWARE=1
 echo "显示会话：$DISPLAY"
 echo "启动程序：$binary"
 cd "$(dirname -- "$binary")"
-exec "$binary"
+exec "$binary" "$@"

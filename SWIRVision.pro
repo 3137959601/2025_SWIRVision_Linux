@@ -18,6 +18,7 @@ SOURCES += \
     linearstretchcalibrationdialog.cpp \
     main.cpp \
     mainwindow.cpp \
+    offline_replay_worker.cpp \
     serialworker.cpp \
     telemetrydebugdialog.cpp \
     uartprotocol.cpp \
@@ -45,6 +46,7 @@ HEADERS += \
     linearstretchcalibrationdialog.h \
     linearstretchmath.h \
     mainwindow.h \
+    offline_replay_worker.h \
     serialworker.h \
     telemetrydebugdialog.h \
     transfer_thread.h \

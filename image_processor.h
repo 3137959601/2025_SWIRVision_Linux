@@ -86,7 +86,7 @@ public slots:
 protected:
     void run();
 private:
-    bool stopFlag=false;  // 用于控制线程终止的标志位
+    std::atomic_bool stopFlag{false};  // 跨线程控制终止
 
     std::atomic<int> m_srcW{2048};
     std::atomic<int> m_srcH{2048};

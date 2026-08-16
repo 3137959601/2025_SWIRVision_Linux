@@ -21,7 +21,7 @@ void ImageProcessor::run()
     cv::Mat1w  proc16;         // NUC 输出 16U
     cv::Mat1w srcShifted;      // ★新增：左移1位（×2）后的工作图
     cv::Mat1w srcStable;   // 本线程的稳定快照
-    while(!stopFlag){
+    while(!stopFlag.load(std::memory_order_acquire)){
         if (!m_hasFrame.exchange(false, std::memory_order_relaxed)) {
             QThread::msleep(1);
             continue;
@@ -200,7 +200,7 @@ void ImageProcessor::run()
 }
 
 void ImageProcessor::stop() {
-    stopFlag = true;  // 外部调用时将标志位设为 true
+    stopFlag.store(true, std::memory_order_release);
 }
 
 

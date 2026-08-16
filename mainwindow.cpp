@@ -14,6 +14,7 @@
 #include <QElapsedTimer>
 #include <QInputDialog>
 #include <QMenuBar>
+#include <QToolBar>
 
 #define AVERAGE_POLL_SIZE   10
 #define CHANNELS_NUM 8
@@ -39,6 +40,7 @@ MainWindow::MainWindow(QWidget *parent) :
     initSerial();   //初始化串口
     //初始化图像控件及线程
     initImageProcessing();
+    setupOfflineReplayUi();
 
     connect(&timer, SIGNAL(timeout()), this, SLOT(transferRate()));
     connect(&monitor, SIGNAL(timeout()), this, SLOT(timerMonitor()));
@@ -53,6 +55,17 @@ MainWindow::MainWindow(QWidget *parent) :
 
 MainWindow::~MainWindow()
 {
+    if (m_offlineReplay) {
+        disconnect(m_offlineReplay, nullptr, this, nullptr);
+        m_offlineReplay->requestStop();
+        m_offlineReplay->wait(3000);
+        delete m_offlineReplay;
+        m_offlineReplay = nullptr;
+    }
+    if (imgProc && imgProc->isRunning()) {
+        imgProc->stop();
+        imgProc->wait(3000);
+    }
     if (serialThread) {
         if (serial_bind_flag && serialworker) {
             QMetaObject::invokeMethod(serialworker, "SerialClose", Qt::BlockingQueuedConnection);
@@ -334,6 +347,196 @@ void MainWindow::initSerial()
     });
 }
 
+void MainWindow::setupOfflineReplayUi()
+{
+    auto *toolbar = addToolBar(QStringLiteral("离线RAW回放"));
+    toolbar->setObjectName(QStringLiteral("offlineReplayToolbar"));
+    m_offlineChooseAction = toolbar->addAction(QStringLiteral("选择离线RAW"));
+    m_offlineStartAction = toolbar->addAction(QStringLiteral("开始离线回放"));
+    m_offlineStopAction = toolbar->addAction(QStringLiteral("停止离线回放"));
+    m_offlineLoopAction = toolbar->addAction(QStringLiteral("循环"));
+    m_offlineLoopAction->setCheckable(true);
+    m_offlineStopAction->setEnabled(false);
+
+    connect(m_offlineChooseAction, &QAction::triggered,
+            this, &MainWindow::selectOfflineReplayFile);
+    connect(m_offlineStartAction, &QAction::triggered,
+            this, &MainWindow::startOfflineReplayFromUi);
+    connect(m_offlineStopAction, &QAction::triggered,
+            this, &MainWindow::stopOfflineReplay);
+}
+
+void MainWindow::selectOfflineReplayFile()
+{
+    const QString selected = QFileDialog::getOpenFileName(
+        this, QStringLiteral("选择16位无头RAW多帧文件"),
+        m_offlineReplayPath.isEmpty() ? QDir::currentPath() : m_offlineReplayPath,
+        QStringLiteral("16位RAW文件 (*.raw);;所有文件 (*)"));
+    if (selected.isEmpty())
+        return;
+    m_offlineReplayPath = selected;
+    statusBar()->showMessage(QStringLiteral("已选择离线RAW：%1").arg(selected), 5000);
+}
+
+void MainWindow::startOfflineReplayFromUi()
+{
+    if (m_offlineReplayPath.isEmpty()) {
+        selectOfflineReplayFile();
+        if (m_offlineReplayPath.isEmpty())
+            return;
+    }
+    bool ok = false;
+    const double fps = QInputDialog::getDouble(
+        this, QStringLiteral("离线回放帧率"), QStringLiteral("FPS："),
+        5.0, 0.1, 120.0, 1, &ok);
+    if (!ok)
+        return;
+    applySpec();
+    startOfflineReplayFile(m_offlineReplayPath,
+                           widget_image::rawWidth(), widget_image::rawHeight(),
+                           fps, m_offlineLoopAction->isChecked(),
+                           ui->comboFormat->currentText() == QStringLiteral("Grayscale16") ? 16 : 8,
+                           true);
+}
+
+void MainWindow::configureOfflineFrameBuffers(int width, int height, int outputBits)
+{
+    const QImage::Format format = outputBits == 8
+        ? QImage::Format_Grayscale8 : QImage::Format_Grayscale16;
+    {
+        QMutexLocker lock(&widget_image::s_imgMutex);
+        widget_image::image = QImage(width, height, format);
+        widget_image::image.fill(0);
+        widget_image::resizeRaw(width, height, width);
+    }
+    if (m_glView)
+        m_glView->setImageSpec(width, height, outputBits);
+    if (imgProc) {
+        imgProc->setSourceSpec(width, height, 2);
+        imgProc->setOutputBits(outputBits);
+    }
+}
+
+bool MainWindow::startOfflineReplayFile(const QString &filePath, int width, int height,
+                                        double framesPerSecond, bool loop,
+                                        int outputBits, bool showDialogs)
+{
+    auto reportStartError = [this, showDialogs](const QString &message) {
+        qCritical().noquote() << "OFFLINE_REPLAY_ERROR:" << message;
+        statusBar()->showMessage(message, 10000);
+        emit offlineReplayFailed(message);
+        if (showDialogs)
+            QMessageBox::critical(this, QStringLiteral("离线回放失败"), message);
+    };
+
+    if (m_offlineReplay) {
+        reportStartError(QStringLiteral("离线回放线程仍在运行或正在结束"));
+        return false;
+    }
+    if (ui->pushButton_start->text() == QStringLiteral("STOP")) {
+        reportStartError(QStringLiteral("USB传输运行时不能启动离线回放，请先停止USB传输"));
+        return false;
+    }
+    if (!imgProc) {
+        reportStartError(QStringLiteral("图像处理线程未初始化"));
+        return false;
+    }
+    if (outputBits != 8 && outputBits != 16) {
+        reportStartError(QStringLiteral("离线显示位深只能是8或16"));
+        return false;
+    }
+
+    configureOfflineFrameBuffers(width, height, outputBits);
+    if (!imgProc->isRunning())
+        imgProc->start();
+
+    OfflineReplayWorker::Settings settings;
+    settings.filePath = filePath;
+    settings.width = width;
+    settings.height = height;
+    settings.framesPerSecond = framesPerSecond;
+    settings.loop = loop;
+
+    auto *worker = new OfflineReplayWorker(settings, this);
+    m_offlineReplay = worker;
+    m_offlineReplayPath = filePath;
+    m_offlineShowDialogs = showDialogs;
+    m_offlineFramePending = false;
+
+    connect(worker, &OfflineReplayWorker::frameDecoded, this,
+            [this, worker, width, height](const QByteArray &frameBytes, quint64 frameIndex) {
+        const qint64 expected = qint64(width) * qint64(height) * qint64(sizeof(quint16));
+        if (qint64(frameBytes.size()) != expected) {
+            const QString message = QStringLiteral("离线帧长度变化：期望%1字节，实际%2字节")
+                                        .arg(expected).arg(frameBytes.size());
+            emit offlineReplayFailed(message);
+            worker->requestStop();
+            return;
+        }
+        {
+            QMutexLocker lock(&widget_image::s_imgMutex);
+            quint16 *destination = widget_image::rawPtr();
+            if (!destination) {
+                emit offlineReplayFailed(QStringLiteral("离线回放原始帧缓冲为空"));
+                worker->requestStop();
+                return;
+            }
+            memcpy(destination, frameBytes.constData(), size_t(frameBytes.size()));
+        }
+        m_pendingOfflineFrameIndex = frameIndex;
+        m_offlineFramePending = true;
+        imgProc->recv_data();
+    }, Qt::QueuedConnection);
+
+    connect(worker, &OfflineReplayWorker::replayError, this,
+            [this](const QString &message) {
+        qCritical().noquote() << "OFFLINE_REPLAY_ERROR:" << message;
+        statusBar()->showMessage(message, 10000);
+        emit offlineReplayFailed(message);
+        if (m_offlineShowDialogs)
+            QMessageBox::critical(this, QStringLiteral("离线回放失败"), message);
+    });
+    connect(worker, &OfflineReplayWorker::replayCompleted, this,
+            [this](quint64 decodedFrames, bool canceled) {
+        qInfo().noquote() << "OFFLINE_REPLAY_COMPLETED frames=" << decodedFrames
+                          << "canceled=" << canceled;
+        emit offlineReplayEnded(decodedFrames, canceled);
+    });
+    connect(worker, &QThread::finished, this, [this, worker]() {
+        if (m_offlineReplay == worker)
+            m_offlineReplay = nullptr;
+        m_offlineFramePending = false;
+        m_offlineStartAction->setEnabled(true);
+        m_offlineChooseAction->setEnabled(true);
+        m_offlineStopAction->setEnabled(false);
+        worker->deleteLater();
+    });
+
+    m_offlineStartAction->setEnabled(false);
+    m_offlineChooseAction->setEnabled(false);
+    m_offlineStopAction->setEnabled(true);
+    statusBar()->showMessage(QStringLiteral("离线RAW回放：%1，%2x%3，%4 FPS")
+                                 .arg(filePath).arg(width).arg(height).arg(framesPerSecond));
+    qInfo().noquote() << "OFFLINE_REPLAY_STARTED file=" << filePath
+                      << "size=" << QStringLiteral("%1x%2").arg(width).arg(height)
+                      << "fps=" << framesPerSecond << "loop=" << loop;
+    worker->start();
+    return true;
+}
+
+void MainWindow::stopOfflineReplay()
+{
+    if (!m_offlineReplay)
+        return;
+    m_offlineReplay->requestStop();
+    statusBar()->showMessage(QStringLiteral("正在停止离线RAW回放……"), 3000);
+}
+
+bool MainWindow::saveCurrentFrame(const QString &filePath)
+{
+    return imgProc && imgProc->saveFrame(filePath);
+}
+
 void MainWindow::initImageProcessing() {
     imgProc = new ImageProcessor(this);
 // ====== 1. 设置 DockWidget 基础属性 ======
@@ -524,6 +727,15 @@ void MainWindow::initImageProcessing() {
     // 处理器 -> UI 重绘
 //    connect(imgProc,&ImageProcessor::updataimage,this->m_imageWidget,&widget_image::repaintImage);//draw线程绘图结束，主线程更新界面
     connect(imgProc, &ImageProcessor::updataimage, this->m_glView,&GLImageWidget::repaintFromSharedImage);
+    connect(imgProc, &ImageProcessor::updataimage, this, [this]() {
+        if (!m_offlineFramePending)
+            return;
+        const quint64 processedIndex = m_pendingOfflineFrameIndex;
+        m_offlineFramePending = false;
+        if (m_offlineReplay)
+            m_offlineReplay->acknowledgeFrame();
+        emit offlineFrameProcessed(processedIndex);
+    });
     // 标定窗口只读取完整原始帧做软件统计，不参与主显示链路，也不发送下位机指令。
     connect(imgProc, &ImageProcessor::updataimage,
             m_linearStretchDialog, &LinearStretchCalibrationDialog::handleFrameAvailable,
