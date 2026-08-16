@@ -15,6 +15,7 @@
 #include <QInputDialog>
 #include <QMenuBar>
 #include <QToolBar>
+#include <limits>
 
 #define AVERAGE_POLL_SIZE   10
 #define CHANNELS_NUM 8
@@ -439,6 +440,16 @@ bool MainWindow::startOfflineReplayFile(const QString &filePath, int width, int 
     }
     if (!imgProc) {
         reportStartError(QStringLiteral("图像处理线程未初始化"));
+        return false;
+    }
+    const qint64 pixelCount = qint64(width) * qint64(height);
+    if (width <= 0 || height <= 0 ||
+        pixelCount > std::numeric_limits<int>::max() / qint64(sizeof(quint16))) {
+        reportStartError(QStringLiteral("离线回放尺寸无效：%1x%2").arg(width).arg(height));
+        return false;
+    }
+    if (!(framesPerSecond > 0.0) || framesPerSecond > 1000.0) {
+        reportStartError(QStringLiteral("离线回放帧率必须大于0且不超过1000 FPS"));
         return false;
     }
     if (outputBits != 8 && outputBits != 16) {
