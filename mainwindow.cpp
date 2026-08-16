@@ -1119,7 +1119,10 @@ void MainWindow::on_pushButton_connect_clicked()
     }
     usbSkeleton = new tihUSBDevice(currentDevice);
     if (!usbSkeleton->open()) {
-        QMessageBox::warning(this, "warning", "Device Connect Failed!");
+        QMessageBox::warning(
+            this, "warning",
+            QStringLiteral("Device Connect Failed!\\n%1")
+                .arg(usbSkeleton->lastError()));
         delete usbSkeleton;
         usbSkeleton = NULL;
         clearSatus();

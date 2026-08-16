@@ -72,6 +72,11 @@ void transferThread::setIsoInfo(uint32_t nbytes, uint32_t interval)
 void transferThread::stop()
 {
     stopFlag = true;
+    cancelLinuxTransfers();
+}
+
+void transferThread::cancelLinuxTransfers()
+{
     std::vector<libusb_transfer *> transfers;
     {
         std::lock_guard<std::mutex> lock(linuxTransferMutex);
@@ -119,7 +124,6 @@ void transferThread::run()
         return;
     }
 
-    stopFlag = false;
     rowStreamParser.reset();
     transBuf = new (std::nothrow)
         unsigned char[std::size_t(transferPackSize) * kLinuxRequestQueue]();
@@ -166,6 +170,8 @@ void transferThread::run()
             libusb_free_transfer(transfer);
             break;
         }
+        if (stopFlag.load())
+            libusb_cancel_transfer(transfer);
     }
 
     {
@@ -205,6 +211,7 @@ void transferThread::linuxTransferCallback(libusb_transfer *transfer)
         return;
 
     bool shouldResubmit = !owner->stopFlag.load();
+    bool fatalError = false;
     if (transfer->status == LIBUSB_TRANSFER_COMPLETED) {
         if (transfer->actual_length > 0) {
             owner->processReceivedBytes(transfer->buffer,
@@ -219,17 +226,34 @@ void transferThread::linuxTransferCallback(libusb_transfer *transfer)
         shouldResubmit = false;
     } else if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE) {
         shouldResubmit = false;
-        owner->stopFlag = true;
+        fatalError = true;
         g_transErr.fetch_add(std::uint64_t(transfer->length));
         qWarning() << "libusb设备已断开，端点："
                    << QStringLiteral("0x%1").arg(owner->usbPipeID, 2, 16,
                                                    QLatin1Char('0'));
+    } else if (transfer->status == LIBUSB_TRANSFER_STALL) {
+        const int clearResult = libusb_clear_halt(
+            owner->usbInterface->nativeHandle(), owner->usbPipeID);
+        if (clearResult != LIBUSB_SUCCESS) {
+            shouldResubmit = false;
+            fatalError = true;
+        }
+        g_transErr.fetch_add(std::uint64_t(transfer->length));
+        qWarning() << "libusb Bulk IN端点STALL，清除结果："
+                   << libusb_error_name(clearResult);
     } else {
+        shouldResubmit = false;
+        fatalError = true;
         g_transErr.fetch_add(std::uint64_t(transfer->length));
         qWarning() << "libusb Bulk IN完成异常，端点："
                    << QStringLiteral("0x%1").arg(owner->usbPipeID, 2, 16,
                                                    QLatin1Char('0'))
                    << "状态：" << transferStatusName(transfer->status);
+    }
+
+    if (fatalError) {
+        owner->stopFlag = true;
+        owner->cancelLinuxTransfers();
     }
 
     if (shouldResubmit) {

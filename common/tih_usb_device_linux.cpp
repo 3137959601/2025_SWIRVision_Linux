@@ -12,6 +12,7 @@ struct LinuxUsbState
     libusb_context *context = nullptr;
     libusb_device_handle *handle = nullptr;
     int interfaceNumber = -1;
+    bool interfaceClaimed = false;
     std::atomic_bool eventLoopRunning{false};
     std::thread eventThread;
 };
@@ -162,6 +163,7 @@ bool tihUSBDevice::open()
         close();
         return false;
     }
+    linuxState->interfaceClaimed = true;
 
     for (int index = 0; index < alternate.bNumEndpoints; ++index) {
         const libusb_endpoint_descriptor &endpoint = alternate.endpoint[index];
@@ -212,7 +214,7 @@ void tihUSBDevice::close()
         linuxState->eventThread.join();
 
     if (linuxState->handle) {
-        if (linuxState->interfaceNumber >= 0) {
+        if (linuxState->interfaceClaimed && linuxState->interfaceNumber >= 0) {
             libusb_release_interface(linuxState->handle,
                                      linuxState->interfaceNumber);
         }

@@ -102,6 +102,7 @@ protected:
     std::condition_variable linuxTransferFinished;
     std::vector<libusb_transfer *> linuxTransfers;
     std::size_t linuxActiveTransfers = 0;
+    void cancelLinuxTransfers();
     static void linuxTransferCallback(libusb_transfer *transfer);
 #endif
 
