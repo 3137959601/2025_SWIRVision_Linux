@@ -1,7 +1,9 @@
 //#include "widget.h"
 #include "mainwindow.h"
+#include "common/device.h"
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QRegularExpression>
 #include <QTimer>
 
 int main(int argc, char *argv[])
@@ -17,7 +19,36 @@ int main(int argc, char *argv[])
     parser.addOption({QStringLiteral("offline-loop"), QStringLiteral("循环回放离线RAW")});
     parser.addOption({QStringLiteral("offline-frames"), QStringLiteral("处理指定帧数后退出（0表示不自动退出）"), QStringLiteral("count"), QStringLiteral("0")});
     parser.addOption({QStringLiteral("offline-save"), QStringLiteral("自动退出前保存当前处理帧"), QStringLiteral("file")});
+    parser.addOption({QStringLiteral("usb-list"), QStringLiteral("只读枚举指定VID:PID后退出"), QStringLiteral("vid:pid")});
     parser.process(a);
+
+    const QString usbList = parser.value(QStringLiteral("usb-list"));
+    if (!usbList.isEmpty()) {
+        static const QRegularExpression idPattern(
+            QStringLiteral("^([0-9a-fA-F]{4}):([0-9a-fA-F]{4})$"));
+        const auto match = idPattern.match(usbList);
+        if (!match.hasMatch()) {
+            qCritical().noquote()
+                << "USB_LIST_ERROR: 参数必须是4位十六进制VID:PID，例如706d:807c";
+            return 2;
+        }
+        bool vidOk = false;
+        bool pidOk = false;
+        const auto vid = std::uint16_t(match.captured(1).toUInt(&vidOk, 16));
+        const auto pid = std::uint16_t(match.captured(2).toUInt(&pidOk, 16));
+        if (!vidOk || !pidOk) {
+            qCritical() << "USB_LIST_ERROR: VID或PID解析失败";
+            return 2;
+        }
+        const QStringList devices = RetrieveDevice(vid, pid);
+        for (const QString &device : devices)
+            qInfo().noquote() << "USB_LIST_DEVICE" << device;
+        qInfo().noquote() << QStringLiteral("USB_LIST_COUNT vid=%1 pid=%2 count=%3")
+                                 .arg(vid, 4, 16, QLatin1Char('0'))
+                                 .arg(pid, 4, 16, QLatin1Char('0'))
+                                 .arg(devices.size());
+        return 0;
+    }
 
     MainWindow w;
     w.show();

@@ -67,10 +67,14 @@ bool tihUSBDevice::open()
     }
     bool busOk = false;
     bool addressOk = false;
+    bool vidOk = false;
+    bool pidOk = false;
     const int bus = match.captured(1).toInt(&busOk);
     const int address = match.captured(2).toInt(&addressOk);
+    const auto expectedVid = std::uint16_t(match.captured(3).toUInt(&vidOk, 16));
+    const auto expectedPid = std::uint16_t(match.captured(4).toUInt(&pidOk, 16));
     if (!busOk || !addressOk || bus < 0 || bus > 255 ||
-        address < 0 || address > 255) {
+        address < 0 || address > 255 || !vidOk || !pidOk) {
         errorString = QStringLiteral("libusb总线号或设备地址无效：%1")
                           .arg(devicePath);
         return false;
@@ -94,8 +98,15 @@ bool tihUSBDevice::open()
 
     libusb_device *selected = nullptr;
     for (ssize_t index = 0; index < count; ++index) {
+        libusb_device_descriptor descriptor{};
+        if (libusb_get_device_descriptor(devices[index], &descriptor) !=
+            LIBUSB_SUCCESS) {
+            continue;
+        }
         if (libusb_get_bus_number(devices[index]) == bus &&
-            libusb_get_device_address(devices[index]) == address) {
+            libusb_get_device_address(devices[index]) == address &&
+            descriptor.idVendor == expectedVid &&
+            descriptor.idProduct == expectedPid) {
             selected = devices[index];
             break;
         }
