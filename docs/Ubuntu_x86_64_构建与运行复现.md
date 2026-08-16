@@ -264,6 +264,16 @@ SWIR_OPENGL_MODE=desktop ./运行_SWIRVision.sh
 
 ## 13. T630连接后的验收顺序
 
+先确认虚拟机本身提供USB 3.x控制器：
+
+```bash
+lspci -nnk | grep -A4 -i 'USB controller'
+lsusb -t
+for f in /sys/bus/usb/devices/usb*/speed; do printf '%s=' "$f"; cat "$f"; done
+```
+
+当前实测只有VMware USB1.1 UHCI和USB2 EHCI，最高根集线器速率480 Mbit/s，没有xHCI。用户需要先关闭虚拟机，在VMware虚拟机设置的“USB控制器”中把兼容性改为USB 3.0或USB 3.1，再启动Ubuntu并把T630连接到虚拟机。复查时应看到xHCI控制器和`5000M`根集线器；否则只能做低速枚举/功能诊断，不能验收USB 3.x性能。
+
 先执行只读检查，不要一上来修改权限：
 
 ```bash
