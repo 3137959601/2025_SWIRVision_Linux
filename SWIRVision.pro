@@ -60,7 +60,7 @@ win32:CONFIG(release, debug|release): LIBS += -LD:/software/opencv/opencv/build/
 else:win32:CONFIG(debug, debug|release): LIBS += -LD:/software/opencv/opencv/build/x64/vc16/lib/ -lopencv_world4100d
 else:unix {
     CONFIG += link_pkgconfig
-    PKGCONFIG += opencv4
+    PKGCONFIG += opencv4 gl
     QMAKE_CXXFLAGS += -fopenmp
     QMAKE_LFLAGS += -fopenmp
 }
