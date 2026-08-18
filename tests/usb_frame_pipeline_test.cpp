@@ -35,10 +35,18 @@ std::vector<std::uint8_t> makePacket(const FrameGeometry &geometry,
     packet[1] = 0xeb;
     packet[2] = 0x00;
     packet[3] = 0x00;
+    packet[4] = std::uint8_t(geometry.width & 0xff);
+    packet[5] = std::uint8_t(geometry.width >> 8);
+    packet[6] = std::uint8_t(geometry.height & 0xff);
+    packet[7] = std::uint8_t(geometry.height >> 8);
     packet[8] = std::uint8_t(row & 0xff);
     packet[9] = std::uint8_t(row >> 8);
     packet[10] = std::uint8_t(frame & 0xff);
     packet[11] = std::uint8_t(frame >> 8);
+    packet[12] = 0xff;
+    packet[13] = 0xff;
+    packet[14] = 0x23;
+    packet[15] = 0x01;
     for (std::size_t x = 0; x < geometry.width; ++x) {
         const std::uint16_t value = std::uint16_t(base + x);
         const std::size_t offset = geometry.headerBytes + x * 2;
@@ -117,6 +125,37 @@ void testNoiseAndInvalidHeaderRecovery()
     require(parser.stats().invalidHeaders == 1, "非法行号统计错误");
     require(parser.stats().packets == 1, "有效包统计错误");
     require(parser.stats().discardedBytes > 0, "噪声丢弃统计缺失");
+}
+
+void testFalseMagicInsidePixelPayload()
+{
+    const FrameGeometry geometry{32, 2, 16, 2, 3};
+    auto first = makePacket(geometry, 20, 1, 100);
+    const auto second = makePacket(geometry, 20, 2, 200);
+
+    // 在像素区构造“魔数+看似合法行号”，但宽高和结束标记不合法。
+    // 解析器从任意中间位置接入时必须跳过伪头并恢复到下一真实行头。
+    const std::size_t falseMagic = geometry.headerBytes + 8;
+    first[falseMagic + 0] = 0x90;
+    first[falseMagic + 1] = 0xeb;
+    first[falseMagic + 2] = 0x00;
+    first[falseMagic + 3] = 0x00;
+    first[falseMagic + 8] = 0x01;
+    first[falseMagic + 9] = 0x00;
+
+    std::vector<std::uint8_t> stream(first.begin() + falseMagic,
+                                     first.end());
+    stream.insert(stream.end(), second.begin(), second.end());
+    RowStreamParser parser(geometry);
+    std::vector<std::uint16_t> rows;
+    parser.consume(stream.data(), stream.size(),
+                   [&rows](const RowPacketView &view) {
+        rows.push_back(view.rowNumber);
+    });
+    require(rows == std::vector<std::uint16_t>({2}),
+            "像素区伪魔数破坏了下一真实行包");
+    require(parser.stats().invalidHeaders >= 1,
+            "像素区伪魔数没有计入无效头");
 }
 
 void testAssemblerOutOfOrderAndDuplicate()
@@ -229,6 +268,7 @@ int main()
         testGeometryValidation();
         testEverySplitPosition();
         testNoiseAndInvalidHeaderRecovery();
+        testFalseMagicInsidePixelPayload();
         testAssemblerOutOfOrderAndDuplicate();
         testSharedAssemblerFromFourEndpointThreads();
         testFrameWindowAndLateRows();

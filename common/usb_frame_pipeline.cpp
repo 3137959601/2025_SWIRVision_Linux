@@ -130,8 +130,16 @@ void RowStreamParser::consumeContiguous(const std::uint8_t *data,
             return;
         }
 
+        const std::uint16_t encodedWidth = readLittleEndian16(data + magicAt + 4);
+        const std::uint16_t encodedHeight = readLittleEndian16(data + magicAt + 6);
         const std::uint16_t rowNumber = readLittleEndian16(data + magicAt + 8);
-        if (rowNumber == 0 || rowNumber > m_geometry.height) {
+        const bool trailerValid = data[magicAt + 12] == 0xff &&
+                                  data[magicAt + 13] == 0xff &&
+                                  data[magicAt + 14] == 0x23 &&
+                                  data[magicAt + 15] == 0x01;
+        if (encodedWidth != m_geometry.width ||
+            encodedHeight != m_geometry.height || !trailerValid ||
+            rowNumber == 0 || rowNumber > m_geometry.height) {
             ++m_stats.invalidHeaders;
             ++m_stats.discardedBytes;
             offset = magicAt + 1;
