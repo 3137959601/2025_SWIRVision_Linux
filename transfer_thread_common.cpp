@@ -2,6 +2,7 @@
 
 #include "widget_image.h"
 
+#include <QDebug>
 #include <QMutexLocker>
 
 #include <cstring>
@@ -39,6 +40,17 @@ void transferThread::processReceivedBytes(const std::uint8_t *data,
         return;
 
     rowStreamParser.consume(data, size, [this](const swir::usb::RowPacketView &row) {
+        #ifdef Q_OS_LINUX
+        if (linuxHeaderSamplesLogged < 12) {
+            qInfo() << "Linux USB行头样本，端点："
+                    << QStringLiteral("0x%1").arg(usbPipeID, 2, 16,
+                                                    QLatin1Char('0'))
+                    << "样本序号：" << linuxHeaderSamplesLogged
+                    << "帧号：" << row.frameNumber
+                    << "行号：" << row.rowNumber;
+            ++linuxHeaderSamplesLogged;
+        }
+        #endif
         auto completed = frameAssembler->ingest(row);
         if (!completed)
             return;

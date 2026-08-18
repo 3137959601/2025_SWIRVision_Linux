@@ -312,7 +312,13 @@ FrameGeometry FrameAssembler::geometry() const
 FrameAssemblerStats FrameAssembler::stats() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_stats;
+    FrameAssemblerStats snapshot = m_stats;
+    snapshot.activeFrames = m_slots.size();
+    snapshot.newestFrameNumber = m_hasNewest ? m_newest : 0;
+    for (const Slot &slot : m_slots)
+        snapshot.fullestFrameRows = std::max(snapshot.fullestFrameRows,
+                                             slot.rowCount);
+    return snapshot;
 }
 
 bool FrameAssembler::isNewer(std::uint16_t candidate,

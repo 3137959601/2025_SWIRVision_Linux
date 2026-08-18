@@ -104,6 +104,7 @@ protected:
     std::size_t linuxActiveTransfers = 0;
     std::uint64_t linuxNextStatsBytes = 64ULL * 1024ULL * 1024ULL;
     bool linuxFirstBytesLogged = false;
+    std::size_t linuxHeaderSamplesLogged = 0;
     void cancelLinuxTransfers();
     static void linuxTransferCallback(libusb_transfer *transfer);
 #endif

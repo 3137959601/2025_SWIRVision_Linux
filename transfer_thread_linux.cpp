@@ -129,6 +129,7 @@ void transferThread::run()
     rowStreamParser.reset();
     linuxNextStatsBytes = 64ULL * 1024ULL * 1024ULL;
     linuxFirstBytesLogged = false;
+    linuxHeaderSamplesLogged = 0;
     transBuf = new (std::nothrow)
         unsigned char[std::size_t(transferPackSize) * kLinuxRequestQueue]();
     if (!transBuf) {
@@ -250,6 +251,10 @@ void transferThread::linuxTransferCallback(libusb_transfer *transfer)
                         << "共享已接收行：" << assemblerStats.acceptedRows
                         << "重复行：" << assemblerStats.duplicateRows
                         << "过期行：" << assemblerStats.expiredRows
+                        << "淘汰帧：" << assemblerStats.evictedFrames
+                        << "活动帧：" << assemblerStats.activeFrames
+                        << "最完整帧行数：" << assemblerStats.fullestFrameRows
+                        << "最新帧号：" << assemblerStats.newestFrameNumber
                         << "完整帧：" << assemblerStats.completedFrames;
                 owner->linuxNextStatsBytes += 64ULL * 1024ULL * 1024ULL;
             }

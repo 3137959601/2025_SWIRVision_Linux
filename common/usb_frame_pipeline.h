@@ -83,6 +83,9 @@ struct FrameAssemblerStats
     std::uint64_t expiredRows = 0;
     std::uint64_t evictedFrames = 0;
     std::uint64_t completedFrames = 0;
+    std::size_t activeFrames = 0;
+    std::size_t fullestFrameRows = 0;
+    std::uint16_t newestFrameNumber = 0;
 };
 
 class FrameAssembler
