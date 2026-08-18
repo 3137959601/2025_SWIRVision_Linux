@@ -255,7 +255,12 @@ void transferThread::linuxTransferCallback(libusb_transfer *transfer)
                         << "活动帧：" << assemblerStats.activeFrames
                         << "最完整帧行数：" << assemblerStats.fullestFrameRows
                         << "最新帧号：" << assemblerStats.newestFrameNumber
-                        << "完整帧：" << assemblerStats.completedFrames;
+                        << "已发布帧：" << assemblerStats.completedFrames
+                        << "其中兼容帧：" << assemblerStats.partialFrames
+                        << "兼容帧累计缺行："
+                        << assemblerStats.missingRowsPublished
+                        << "沿用上一帧累计行："
+                        << assemblerStats.rowsFilledFromPreviousFrame;
                 owner->linuxNextStatsBytes += 64ULL * 1024ULL * 1024ULL;
             }
             g_transOk.fetch_add(std::uint64_t(transfer->actual_length));

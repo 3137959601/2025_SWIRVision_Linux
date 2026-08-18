@@ -25,6 +25,9 @@ void transferThread::setFrameSpec(int w, int h, int headerBytes,
     if (bytesPerPixel > 0)
         geometry.bytesPerPixel = std::size_t(bytesPerPixel);
     geometry.frameWindow = 3;
+    // 400W模组现场连续帧稳定只到2040/2048行。原Windows上位机会在帧号
+    // 切换时直接显示旧帧；Linux项目仅对此规格允许最多8行兼容补帧。
+    geometry.allowedMissingRows = (w == 2048 && h == 2048) ? 8 : 0;
 
     rowStreamParser.configure(geometry);
     if (!frameAssembler)
@@ -54,6 +57,20 @@ void transferThread::processReceivedBytes(const std::uint8_t *data,
         auto completed = frameAssembler->ingest(row);
         if (!completed)
             return;
+
+        if (completed->missingRows != 0) {
+            ++partialFrameWarnings;
+            if (partialFrameWarnings <= 5 ||
+                partialFrameWarnings % 100 == 0) {
+                qWarning() << "USB兼容发布不完整帧，帧号："
+                           << completed->frameNumber
+                           << "缺失行：" << completed->missingRows
+                           << "沿用上一帧行："
+                           << completed->rowsFilledFromPreviousFrame
+                           << "本线程兼容发布次数："
+                           << partialFrameWarnings;
+            }
+        }
 
         bool copied = false;
         {

@@ -96,6 +96,7 @@ protected:
     // 每个Bulk IN端点保留独立残包状态，四个端点共享同一个完整帧组装器。
     swir::usb::RowStreamParser rowStreamParser;
     std::shared_ptr<swir::usb::FrameAssembler> frameAssembler;
+    std::uint64_t partialFrameWarnings = 0;
 
 #ifdef Q_OS_LINUX
     std::mutex linuxTransferMutex;

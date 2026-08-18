@@ -337,3 +337,25 @@ sudo usermod -aG dialout "$USER"
 ## 14. 当前阶段门槛
 
 Ubuntu x86_64的无模组软件实现、自动回归和运行包已经完成。当前必须等待T630硬件连接；只有USB真实采集、停止/重连和串口控制通过后，才进入RK3588 ARM64移植。RK3588和EVS在此之前不继续修改。
+
+## 15. 固定缺8行时的Windows兼容显示
+
+现场严格解析结果为每帧稳定`2040/2048`行。当前Linux独立项目保留2048×2048协议，仅对该规格允许最多缺8行：检测到下一帧后发布上一帧，缺失行沿用上一张已发布图像，首帧缺行补零。这复现了原Windows缓冲区不清零并在帧号切换时发布的效果，但统计和警告仍保留实际缺行，不应据此写成“模组零丢行”。
+
+关键复测命令：
+
+```bash
+cd /home/d508/projects/2025_SWIRVision_Linux
+bash scripts/linux/test_usb_frame_pipeline.sh
+bash scripts/linux/test_all_x86_64.sh debug
+```
+
+真机GUI按以下顺序操作：检索设备、连接、打开串口、开始传输约10秒、停止传输。随后保存日志：
+
+```bash
+grep -E 'USB兼容发布|已发布帧|其中兼容帧|最完整帧行数' \
+  build/x86_64-debug/hardware-gui.log | tail -n 80
+tail -n 30 build/x86_64-debug/speed_log.txt
+```
+
+预期是出现`USB兼容发布不完整帧`并且GUI产生图像。若仍无图像，检查是否出现`已发布帧`增长：增长但无图说明问题在显示链路；不增长则继续检查实际最完整行数是否低于2040。以上操作不需要sudo。

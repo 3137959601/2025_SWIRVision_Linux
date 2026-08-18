@@ -78,6 +78,9 @@ void testGeometryValidation()
             "当前协议只允许16位像素");
     require(FrameGeometry{4, 3, 16, 2, 3}.isValid(),
             "合法几何参数被拒绝");
+    FrameGeometry invalidTolerance{4, 3, 16, 2, 3};
+    invalidTolerance.allowedMissingRows = 3;
+    require(!invalidTolerance.isValid(), "不能允许整帧所有行均缺失");
 }
 
 void testEverySplitPosition()
@@ -244,6 +247,61 @@ void testFrameWindowAndLateRows()
     require(stats.expiredRows == 1, "迟到旧行统计错误");
 }
 
+void testWindowsCompatiblePartialFramePublishing()
+{
+    FrameGeometry geometry{2, 3, 16, 2, 3};
+    geometry.allowedMissingRows = 1;
+    FrameAssembler assembler(geometry);
+
+    auto frame10row1 = makePacket(geometry, 10, 1, 100);
+    auto frame10row2 = makePacket(geometry, 10, 2, 200);
+    auto frame11row1 = makePacket(geometry, 11, 1, 110);
+    auto frame11row3 = makePacket(geometry, 11, 3, 310);
+    auto frame12row1 = makePacket(geometry, 12, 1, 120);
+
+    require(!assembler.ingest(packetView(geometry, frame10row1)),
+            "兼容模式不应在新帧到达前提前发布");
+    require(!assembler.ingest(packetView(geometry, frame10row2)),
+            "兼容模式不应在新帧到达前提前发布");
+    auto first = assembler.ingest(packetView(geometry, frame11row1));
+    require(first.has_value() && first->frameNumber == 10,
+            "新帧到达后未发布缺一行的旧帧");
+    require(first->missingRows == 1 &&
+                first->rowsFilledFromPreviousFrame == 0,
+            "首个兼容帧的补行统计错误");
+    require(first->pixels == std::vector<std::uint16_t>(
+                {100, 101, 200, 201, 0, 0}),
+            "首个兼容帧缺行应补零");
+
+    require(!assembler.ingest(packetView(geometry, frame11row3)),
+            "第二个兼容帧不应提前发布");
+    auto second = assembler.ingest(packetView(geometry, frame12row1));
+    require(second.has_value() && second->frameNumber == 11,
+            "第二个兼容帧未在帧切换时发布");
+    require(second->missingRows == 1 &&
+                second->rowsFilledFromPreviousFrame == 1,
+            "第二个兼容帧未记录沿用上一帧行");
+    require(second->pixels == std::vector<std::uint16_t>(
+                {110, 111, 200, 201, 310, 311}),
+            "缺失行没有沿用上一帧对应行");
+
+    const auto stats = assembler.stats();
+    require(stats.completedFrames == 2 && stats.partialFrames == 2,
+            "兼容帧发布统计错误");
+    require(stats.missingRowsPublished == 2 &&
+                stats.rowsFilledFromPreviousFrame == 1,
+            "兼容帧补行累计统计错误");
+
+    FrameGeometry strictGeometry{2, 3, 16, 2, 3};
+    FrameAssembler strictAssembler(strictGeometry);
+    require(!strictAssembler.ingest(packetView(strictGeometry, frame10row1)),
+            "严格模式一行数据不应完成帧");
+    require(!strictAssembler.ingest(packetView(strictGeometry, frame10row2)),
+            "严格模式两行数据不应完成帧");
+    require(!strictAssembler.ingest(packetView(strictGeometry, frame11row1)),
+            "严格模式不得发布不完整帧");
+}
+
 void testFrameNumberWrap()
 {
     const FrameGeometry geometry{2, 1, 16, 2, 3};
@@ -272,6 +330,7 @@ int main()
         testAssemblerOutOfOrderAndDuplicate();
         testSharedAssemblerFromFourEndpointThreads();
         testFrameWindowAndLateRows();
+        testWindowsCompatiblePartialFramePublishing();
         testFrameNumberWrap();
         std::cout << "USB协议层回归测试全部通过。" << std::endl;
         return 0;

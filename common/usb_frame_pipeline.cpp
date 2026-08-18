@@ -20,7 +20,8 @@ bool sameGeometry(const FrameGeometry &lhs, const FrameGeometry &rhs) noexcept
     return lhs.width == rhs.width && lhs.height == rhs.height &&
            lhs.headerBytes == rhs.headerBytes &&
            lhs.bytesPerPixel == rhs.bytesPerPixel &&
-           lhs.frameWindow == rhs.frameWindow;
+           lhs.frameWindow == rhs.frameWindow &&
+           lhs.allowedMissingRows == rhs.allowedMissingRows;
 }
 
 } // namespace
@@ -28,7 +29,8 @@ bool sameGeometry(const FrameGeometry &lhs, const FrameGeometry &rhs) noexcept
 bool FrameGeometry::isValid() const noexcept
 {
     if (width == 0 || height == 0 || headerBytes < 12 ||
-        bytesPerPixel != 2 || frameWindow == 0) {
+        bytesPerPixel != 2 || frameWindow == 0 ||
+        allowedMissingRows >= height) {
         return false;
     }
     if (width > std::numeric_limits<std::size_t>::max() / bytesPerPixel) {
@@ -217,6 +219,7 @@ void FrameAssembler::resetLocked()
     m_newest = 0;
     m_hasPublished = false;
     m_lastPublished = 0;
+    m_lastPublishedPixels.clear();
     m_stats = {};
 }
 
@@ -243,14 +246,6 @@ std::optional<CompletedFrame> FrameAssembler::ingest(
         m_newest = packet.frameNumber;
         m_hasNewest = true;
     }
-
-    const auto beforePrune = m_slots.size();
-    m_slots.erase(std::remove_if(m_slots.begin(), m_slots.end(),
-                                 [this](const Slot &slot) {
-        const std::uint16_t age = std::uint16_t(m_newest - slot.frameNumber);
-        return age >= m_geometry.frameWindow && age < 0x8000;
-    }), m_slots.end());
-    m_stats.evictedFrames += beforePrune - m_slots.size();
 
     const std::uint16_t age = std::uint16_t(m_newest - packet.frameNumber);
     if (age >= m_geometry.frameWindow) {
@@ -292,16 +287,66 @@ std::optional<CompletedFrame> FrameAssembler::ingest(
     ++slot->rowCount;
     ++m_stats.acceptedRows;
 
-    if (slot->rowCount != m_geometry.height) {
+    auto publishSlot = m_slots.end();
+    if (slot->rowCount == m_geometry.height) {
+        publishSlot = slot;
+    } else if (m_geometry.allowedMissingRows != 0) {
+        // 与原Windows上位机的帧切换语义一致：看到更新帧后，才确认旧帧不会
+        // 再正常补齐；只发布缺行数在明确容限内的旧帧。
+        std::uint16_t greatestAge = 0;
+        for (auto candidate = m_slots.begin(); candidate != m_slots.end();
+             ++candidate) {
+            const std::uint16_t candidateAge =
+                std::uint16_t(m_newest - candidate->frameNumber);
+            const bool isOlder = candidateAge != 0 && candidateAge < 0x8000;
+            const std::size_t missingRows =
+                m_geometry.height - candidate->rowCount;
+            if (isOlder && missingRows <= m_geometry.allowedMissingRows &&
+                (publishSlot == m_slots.end() || candidateAge > greatestAge)) {
+                publishSlot = candidate;
+                greatestAge = candidateAge;
+            }
+        }
+    }
+
+    if (publishSlot == m_slots.end()) {
+        const auto beforePrune = m_slots.size();
+        m_slots.erase(std::remove_if(m_slots.begin(), m_slots.end(),
+                                     [this](const Slot &candidate) {
+            const std::uint16_t candidateAge =
+                std::uint16_t(m_newest - candidate.frameNumber);
+            return candidateAge >= m_geometry.frameWindow &&
+                   candidateAge < 0x8000;
+        }), m_slots.end());
+        m_stats.evictedFrames += beforePrune - m_slots.size();
         return std::nullopt;
     }
 
     CompletedFrame completed;
-    completed.frameNumber = packet.frameNumber;
-    completed.pixels = std::move(slot->pixels);
-    m_lastPublished = packet.frameNumber;
+    completed.frameNumber = publishSlot->frameNumber;
+    completed.missingRows = m_geometry.height - publishSlot->rowCount;
+    if (completed.missingRows != 0 &&
+        m_lastPublishedPixels.size() == publishSlot->pixels.size()) {
+        for (std::size_t row = 0; row < m_geometry.height; ++row) {
+            if (publishSlot->rowReceived[row])
+                continue;
+            std::copy_n(m_lastPublishedPixels.data() + row * m_geometry.width,
+                        m_geometry.width,
+                        publishSlot->pixels.data() + row * m_geometry.width);
+            ++completed.rowsFilledFromPreviousFrame;
+        }
+    }
+    completed.pixels = std::move(publishSlot->pixels);
+    m_lastPublishedPixels = completed.pixels;
+    m_lastPublished = completed.frameNumber;
     m_hasPublished = true;
     ++m_stats.completedFrames;
+    if (completed.missingRows != 0) {
+        ++m_stats.partialFrames;
+        m_stats.missingRowsPublished += completed.missingRows;
+        m_stats.rowsFilledFromPreviousFrame +=
+            completed.rowsFilledFromPreviousFrame;
+    }
 
     m_slots.erase(std::remove_if(m_slots.begin(), m_slots.end(),
                                  [this](const Slot &candidate) {

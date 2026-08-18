@@ -18,6 +18,8 @@ struct FrameGeometry
     std::size_t headerBytes = 16;
     std::size_t bytesPerPixel = 2;
     std::size_t frameWindow = 3;
+    // 默认为0，表示必须收齐全部行。仅已确认存在固定丢行的硬件可显式放宽。
+    std::size_t allowedMissingRows = 0;
 
     bool isValid() const noexcept;
     std::size_t payloadBytes() const noexcept;
@@ -73,6 +75,8 @@ struct CompletedFrame
 {
     std::uint16_t frameNumber = 0;
     std::vector<std::uint16_t> pixels;
+    std::size_t missingRows = 0;
+    std::size_t rowsFilledFromPreviousFrame = 0;
 };
 
 struct FrameAssemblerStats
@@ -83,6 +87,9 @@ struct FrameAssemblerStats
     std::uint64_t expiredRows = 0;
     std::uint64_t evictedFrames = 0;
     std::uint64_t completedFrames = 0;
+    std::uint64_t partialFrames = 0;
+    std::uint64_t missingRowsPublished = 0;
+    std::uint64_t rowsFilledFromPreviousFrame = 0;
     std::size_t activeFrames = 0;
     std::size_t fullestFrameRows = 0;
     std::uint16_t newestFrameNumber = 0;
@@ -120,6 +127,7 @@ private:
     std::uint16_t m_newest = 0;
     bool m_hasPublished = false;
     std::uint16_t m_lastPublished = 0;
+    std::vector<std::uint16_t> m_lastPublishedPixels;
     FrameAssemblerStats m_stats;
 };
 
