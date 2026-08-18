@@ -19,4 +19,4 @@ repo_dir="$(CDPATH= cd -- "$script_dir/../.." && pwd)"
 "$repo_dir/scripts/linux/test_libusb_enumeration.sh" "$build_type"
 "$repo_dir/scripts/linux/test_offline_replay.sh" "$build_type"
 
-echo "Ubuntu x86_64无模组软件回归全部通过。"
+echo "Ubuntu x86_64软件回归全部通过；T630真机打开检查按现场枚举结果自动执行。"

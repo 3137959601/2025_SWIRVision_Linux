@@ -1,10 +1,41 @@
 //#include "widget.h"
 #include "mainwindow.h"
 #include "common/device.h"
+#include "common/tih_usb_device.h"
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QRegularExpression>
 #include <QTimer>
+
+namespace {
+
+bool parseUsbId(const QString &text, std::uint16_t &vid, std::uint16_t &pid)
+{
+    static const QRegularExpression idPattern(
+        QStringLiteral("^([0-9a-fA-F]{4}):([0-9a-fA-F]{4})$"));
+    const auto match = idPattern.match(text);
+    if (!match.hasMatch())
+        return false;
+    bool vidOk = false;
+    bool pidOk = false;
+    vid = std::uint16_t(match.captured(1).toUInt(&vidOk, 16));
+    pid = std::uint16_t(match.captured(2).toUInt(&pidOk, 16));
+    return vidOk && pidOk;
+}
+
+QString pipeTypeName(UsbPipeType type)
+{
+    switch (type) {
+    case UsbPipeType::Control: return QStringLiteral("control");
+    case UsbPipeType::Isochronous: return QStringLiteral("isochronous");
+    case UsbPipeType::Bulk: return QStringLiteral("bulk");
+    case UsbPipeType::Interrupt: return QStringLiteral("interrupt");
+    case UsbPipeType::Unknown: return QStringLiteral("unknown");
+    }
+    return QStringLiteral("unknown");
+}
+
+} // namespace
 
 int main(int argc, char *argv[])
 {
@@ -20,33 +51,73 @@ int main(int argc, char *argv[])
     parser.addOption({QStringLiteral("offline-frames"), QStringLiteral("处理指定帧数后退出（0表示不自动退出）"), QStringLiteral("count"), QStringLiteral("0")});
     parser.addOption({QStringLiteral("offline-save"), QStringLiteral("自动退出前保存当前处理帧"), QStringLiteral("file")});
     parser.addOption({QStringLiteral("usb-list"), QStringLiteral("只读枚举指定VID:PID后退出"), QStringLiteral("vid:pid")});
+    parser.addOption({QStringLiteral("usb-open-check"), QStringLiteral("打开并声明指定VID:PID设备，打印端点后关闭"), QStringLiteral("vid:pid")});
     parser.process(a);
 
     const QString usbList = parser.value(QStringLiteral("usb-list"));
-    if (!usbList.isEmpty()) {
-        static const QRegularExpression idPattern(
-            QStringLiteral("^([0-9a-fA-F]{4}):([0-9a-fA-F]{4})$"));
-        const auto match = idPattern.match(usbList);
-        if (!match.hasMatch()) {
+    const QString usbOpenCheck = parser.value(QStringLiteral("usb-open-check"));
+    if (!usbList.isEmpty() && !usbOpenCheck.isEmpty()) {
+        qCritical() << "USB_ERROR: --usb-list和--usb-open-check不能同时使用";
+        return 2;
+    }
+    if (!usbList.isEmpty() || !usbOpenCheck.isEmpty()) {
+        const QString usbId = usbList.isEmpty() ? usbOpenCheck : usbList;
+        std::uint16_t vid = 0;
+        std::uint16_t pid = 0;
+        if (!parseUsbId(usbId, vid, pid)) {
             qCritical().noquote()
-                << "USB_LIST_ERROR: 参数必须是4位十六进制VID:PID，例如706d:807c";
-            return 2;
-        }
-        bool vidOk = false;
-        bool pidOk = false;
-        const auto vid = std::uint16_t(match.captured(1).toUInt(&vidOk, 16));
-        const auto pid = std::uint16_t(match.captured(2).toUInt(&pidOk, 16));
-        if (!vidOk || !pidOk) {
-            qCritical() << "USB_LIST_ERROR: VID或PID解析失败";
+                << "USB_ERROR: 参数必须是4位十六进制VID:PID，例如706d:807c";
             return 2;
         }
         const QStringList devices = RetrieveDevice(vid, pid);
-        for (const QString &device : devices)
-            qInfo().noquote() << "USB_LIST_DEVICE" << device;
-        qInfo().noquote() << QStringLiteral("USB_LIST_COUNT vid=%1 pid=%2 count=%3")
-                                 .arg(vid, 4, 16, QLatin1Char('0'))
-                                 .arg(pid, 4, 16, QLatin1Char('0'))
-                                 .arg(devices.size());
+        if (!usbList.isEmpty()) {
+            for (const QString &device : devices)
+                qInfo().noquote() << "USB_LIST_DEVICE" << device;
+            qInfo().noquote() << QStringLiteral("USB_LIST_COUNT vid=%1 pid=%2 count=%3")
+                                     .arg(vid, 4, 16, QLatin1Char('0'))
+                                     .arg(pid, 4, 16, QLatin1Char('0'))
+                                     .arg(devices.size());
+            return 0;
+        }
+
+        if (devices.isEmpty()) {
+            qCritical().noquote() << QStringLiteral("USB_OPEN_ERROR: 未找到设备 vid=%1 pid=%2")
+                                         .arg(vid, 4, 16, QLatin1Char('0'))
+                                         .arg(pid, 4, 16, QLatin1Char('0'));
+            return 3;
+        }
+
+        tihUSBDevice device(devices.first());
+        if (!device.open()) {
+            qCritical().noquote() << "USB_OPEN_ERROR:" << device.lastError();
+            return 4;
+        }
+        const QList<UsbEndpointInfo> endpoints = device.endPoints();
+        int bulkInCount = 0;
+        int bulkOutCount = 0;
+        for (const UsbEndpointInfo &endpoint : endpoints) {
+            if (endpoint.pipeType == UsbPipeType::Bulk) {
+                if ((endpoint.address & 0x80U) != 0)
+                    ++bulkInCount;
+                else
+                    ++bulkOutCount;
+            }
+            qInfo().noquote()
+                << QStringLiteral("USB_OPEN_ENDPOINT address=0x%1 type=%2 max_packet=%3 interval=%4 max_bytes=%5")
+                       .arg(endpoint.address, 2, 16, QLatin1Char('0'))
+                       .arg(pipeTypeName(endpoint.pipeType))
+                       .arg(endpoint.maximumPacketSize)
+                       .arg(endpoint.interval)
+                       .arg(endpoint.maximumBytesPerInterval);
+        }
+        qInfo().noquote()
+            << QStringLiteral("USB_OPEN_OK device=%1 endpoints=%2 bulk_in=%3 bulk_out=%4")
+                   .arg(devices.first())
+                   .arg(endpoints.size())
+                   .arg(bulkInCount)
+                   .arg(bulkOutCount);
+        device.close();
+        qInfo() << "USB_CLOSE_OK";
         return 0;
     }
 

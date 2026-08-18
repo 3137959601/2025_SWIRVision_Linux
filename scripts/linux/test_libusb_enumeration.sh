@@ -32,6 +32,19 @@ grep -Eq 'USB_LIST_COUNT vid=0e0f pid=0006 count=[1-9][0-9]*' \
     >"$evidence_dir/t630-default.log" 2>&1
 grep -Eq 'USB_LIST_COUNT vid=706d pid=807c count=[0-9]+' \
     "$evidence_dir/t630-default.log"
+t630_count="$(sed -nE 's/.*USB_LIST_COUNT vid=706d pid=807c count=([0-9]+).*/\1/p' \
+    "$evidence_dir/t630-default.log" | tail -1)"
+if [[ -z "$t630_count" ]]; then
+    echo "无法从枚举日志解析T630数量。" >&2
+    exit 4
+fi
+if (( t630_count > 0 )); then
+    "$binary" --usb-open-check 706d:807c \
+        >"$evidence_dir/t630-open-check.log" 2>&1
+    grep -Eq 'USB_OPEN_OK .*endpoints=8 bulk_in=4 bulk_out=4' \
+        "$evidence_dir/t630-open-check.log"
+    grep -q 'USB_CLOSE_OK' "$evidence_dir/t630-open-check.log"
+fi
 
 set +e
 "$binary" --usb-list invalid \
@@ -48,4 +61,9 @@ grep -q 'libusb-1.0.so' "$evidence_dir/ldd.log"
 
 cat "$evidence_dir/vmware-keyboard.log"
 cat "$evidence_dir/t630-default.log"
-echo "libusb只读枚举回归测试全部通过。证据目录：$evidence_dir"
+if (( t630_count > 0 )); then
+    cat "$evidence_dir/t630-open-check.log"
+    echo "libusb枚举、T630打开/声明和四入四出端点检查全部通过。证据目录：$evidence_dir"
+else
+    echo "libusb只读枚举回归测试全部通过；本次未连接T630。证据目录：$evidence_dir"
+fi
