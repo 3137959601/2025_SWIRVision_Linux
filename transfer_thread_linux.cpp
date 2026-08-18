@@ -14,7 +14,9 @@ extern std::atomic_uint64_t g_transErr;
 
 namespace {
 
-constexpr std::size_t kLinuxRequestQueue = 64;
+// Ubuntu默认usbfs_memory_mb通常只有16 MiB。四端点各排队3个1 MiB请求
+// 共12 MiB，既保留异步流水，也为控制传输和其他USB设备留出余量。
+constexpr std::size_t kLinuxRequestQueue = 3;
 
 const char *transferStatusName(libusb_transfer_status status)
 {
@@ -125,6 +127,8 @@ void transferThread::run()
     }
 
     rowStreamParser.reset();
+    linuxNextStatsBytes = 64ULL * 1024ULL * 1024ULL;
+    linuxFirstBytesLogged = false;
     transBuf = new (std::nothrow)
         unsigned char[std::size_t(transferPackSize) * kLinuxRequestQueue]();
     if (!transBuf) {
@@ -140,6 +144,7 @@ void transferThread::run()
         linuxActiveTransfers = 0;
     }
 
+    std::size_t submittedCount = 0;
     for (std::size_t index = 0; index < kLinuxRequestQueue; ++index) {
         if (stopFlag.load())
             break;
@@ -170,9 +175,15 @@ void transferThread::run()
             libusb_free_transfer(transfer);
             break;
         }
+        ++submittedCount;
         if (stopFlag.load())
             libusb_cancel_transfer(transfer);
     }
+
+    qInfo() << "Linux USB异步队列已启动，端点："
+            << QStringLiteral("0x%1").arg(usbPipeID, 2, 16, QLatin1Char('0'))
+            << "块大小：" << transferPackSize
+            << "成功提交：" << submittedCount;
 
     {
         std::unique_lock<std::mutex> lock(linuxTransferMutex);
@@ -214,8 +225,34 @@ void transferThread::linuxTransferCallback(libusb_transfer *transfer)
     bool fatalError = false;
     if (transfer->status == LIBUSB_TRANSFER_COMPLETED) {
         if (transfer->actual_length > 0) {
+            if (!owner->linuxFirstBytesLogged) {
+                const int sampleSize = qMin(64, transfer->actual_length);
+                const QByteArray sample(
+                    reinterpret_cast<const char *>(transfer->buffer), sampleSize);
+                qInfo() << "Linux USB首批字节，端点："
+                        << QStringLiteral("0x%1").arg(owner->usbPipeID, 2, 16,
+                                                        QLatin1Char('0'))
+                        << sample.toHex(' ').toUpper();
+                owner->linuxFirstBytesLogged = true;
+            }
             owner->processReceivedBytes(transfer->buffer,
                                         std::size_t(transfer->actual_length));
+            const auto &parserStats = owner->rowStreamParser.stats();
+            if (parserStats.inputBytes >= owner->linuxNextStatsBytes) {
+                const auto assemblerStats = owner->frameAssembler->stats();
+                qInfo() << "Linux USB解析统计，端点："
+                        << QStringLiteral("0x%1").arg(owner->usbPipeID, 2, 16,
+                                                        QLatin1Char('0'))
+                        << "输入字节：" << parserStats.inputBytes
+                        << "行包：" << parserStats.packets
+                        << "丢弃字节：" << parserStats.discardedBytes
+                        << "无效头：" << parserStats.invalidHeaders
+                        << "共享已接收行：" << assemblerStats.acceptedRows
+                        << "重复行：" << assemblerStats.duplicateRows
+                        << "过期行：" << assemblerStats.expiredRows
+                        << "完整帧：" << assemblerStats.completedFrames;
+                owner->linuxNextStatsBytes += 64ULL * 1024ULL * 1024ULL;
+            }
             g_transOk.fetch_add(std::uint64_t(transfer->actual_length));
             if (transfer->actual_length < transfer->length) {
                 g_transErr.fetch_add(

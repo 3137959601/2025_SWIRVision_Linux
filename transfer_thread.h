@@ -102,6 +102,8 @@ protected:
     std::condition_variable linuxTransferFinished;
     std::vector<libusb_transfer *> linuxTransfers;
     std::size_t linuxActiveTransfers = 0;
+    std::uint64_t linuxNextStatsBytes = 64ULL * 1024ULL * 1024ULL;
+    bool linuxFirstBytesLogged = false;
     void cancelLinuxTransfers();
     static void linuxTransferCallback(libusb_transfer *transfer);
 #endif

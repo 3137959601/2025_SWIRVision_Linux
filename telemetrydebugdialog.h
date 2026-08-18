@@ -23,6 +23,8 @@ public:
     void handleFrame(const TelemetryFrame &frame);
     void addChecksumErrors(int count);
     void notifyConfigSaveRequested();
+    void handleRawBytes(const QByteArray &bytes);
+    void handleSerialState(bool opened, const QString &message);
 
 signals:
     void commandRequested(const QByteArray &command);
@@ -40,6 +42,8 @@ private:
 
     QHash<QString, QLabel*> m_labels;
     QLabel *m_errorLabel = nullptr;
+    QLabel *m_serialStateLabel = nullptr;
+    QLabel *m_rawReceiveLabel = nullptr;
     QLabel *m_csvLabel = nullptr;
     QPushButton *m_csvButton = nullptr;
     QDoubleSpinBox *m_intTime = nullptr;
@@ -63,6 +67,7 @@ private:
     QFile m_csvFile;
     QString m_csvPath;
     int m_checksumErrors = 0;
+    quint64 m_rawReceiveBytes = 0;
     quint8 m_lastFlashStatus = 0;
     bool m_configSavePending = false;
     bool m_configSaveSawClear = false;

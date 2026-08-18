@@ -47,6 +47,8 @@ public slots:
     void timeUpdate();
 signals:
     void recvDataSignal(QString buf);
+    void rawBytesReceived(const QByteArray &bytes);
+    void serialStateChanged(bool opened, const QString &message);
     void Int_LCDNumShow(float time);
     void BoardTemp_LCDNumShow(float temp);
     void TECTemp_LCDNumShow(std::vector<float>temp);

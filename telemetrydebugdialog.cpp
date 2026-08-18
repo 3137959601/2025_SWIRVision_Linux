@@ -174,14 +174,42 @@ QWidget *TelemetryDebugDialog::buildStatusPanel()
     m_csvButton = new QPushButton(QStringLiteral("开始记录"), page);
     m_csvLabel = new QLabel(QStringLiteral("未选择文件"), page);
     m_errorLabel = new QLabel(QStringLiteral("校验错误：0"), page);
+    m_serialStateLabel = new QLabel(QStringLiteral("串口：尚未打开"), page);
+    m_rawReceiveLabel = new QLabel(QStringLiteral("原始接收：0 字节"), page);
+    m_rawReceiveLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_rawReceiveLabel->setWordWrap(true);
     save->addWidget(choose, 0, 0);
     save->addWidget(m_csvButton, 0, 1);
     save->addWidget(m_errorLabel, 0, 2);
     save->addWidget(m_csvLabel, 1, 0, 1, 3);
+    save->addWidget(m_serialStateLabel, 2, 0, 1, 3);
+    save->addWidget(m_rawReceiveLabel, 3, 0, 1, 3);
     layout->addLayout(save);
     connect(choose, &QPushButton::clicked, this, &TelemetryDebugDialog::chooseCsvFile);
     connect(m_csvButton, &QPushButton::clicked, this, &TelemetryDebugDialog::toggleCsv);
     return page;
+}
+
+void TelemetryDebugDialog::handleRawBytes(const QByteArray &bytes)
+{
+    if (bytes.isEmpty() || !m_rawReceiveLabel)
+        return;
+    m_rawReceiveBytes += quint64(bytes.size());
+    const QByteArray tail = bytes.right(64).toHex(' ').toUpper();
+    m_rawReceiveLabel->setText(
+        QStringLiteral("原始接收：累计 %1 字节；本次 %2 字节；末尾HEX：%3")
+            .arg(m_rawReceiveBytes).arg(bytes.size())
+            .arg(QString::fromLatin1(tail)));
+}
+
+void TelemetryDebugDialog::handleSerialState(bool opened, const QString &message)
+{
+    if (!m_serialStateLabel)
+        return;
+    m_serialStateLabel->setText(QStringLiteral("串口：%1；%2")
+                                    .arg(opened ? QStringLiteral("已打开")
+                                                : QStringLiteral("未打开"),
+                                         message));
 }
 
 QWidget *TelemetryDebugDialog::buildCommandPanel()

@@ -135,10 +135,15 @@ void SerialWorker::SerialPortInit(QString com_name)
     if(serialWorker->open(QIODevice::ReadWrite)==true)
     {
         serial_bind_flag = true;
-        //qDebug()<<"串口打开成功";
+        const QString message = QStringLiteral("%1 已打开（115200 8N1）").arg(com_name);
+        qInfo() << message;
+        emit serialStateChanged(true, message);
     }else{
         serial_bind_flag = false;
-        //qDebug()<<"串口打开失败";
+        const QString message = QStringLiteral("%1 打开失败：%2")
+                                    .arg(com_name, serialWorker->errorString());
+        qWarning() << message;
+        emit serialStateChanged(false, message);
     }
     //qDebug()<<"serial_bind_flag"<<serial_bind_flag;
 
@@ -744,7 +749,11 @@ void SerialWorker::SerialPortReadyRead_Slot()
 {
     if (!serialWorker || !timer) return;
 
-    baRcvData.append(serialWorker->readAll());
+    const QByteArray received = serialWorker->readAll();
+    if (received.isEmpty())
+        return;
+    emit rawBytesReceived(received);
+    baRcvData.append(received);
     SerialAnalyse(baRcvData);
 
 //    qDebug()<<baRcvData;

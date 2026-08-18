@@ -334,6 +334,12 @@ void MainWindow::initSerial()
                 m_linearStretchDialog->handleTelemetryFrame(frame);
         }
     });
+    connect(serialworker, &SerialWorker::rawBytesReceived,
+            m_telemetryDialog, &TelemetryDebugDialog::handleRawBytes,
+            Qt::QueuedConnection);
+    connect(serialworker, &SerialWorker::serialStateChanged,
+            m_telemetryDialog, &TelemetryDebugDialog::handleSerialState,
+            Qt::QueuedConnection);
 
     auto *debugMenu = menuBar()->addMenu(QStringLiteral("调试"));
     auto *telemetryAction = debugMenu->addAction(QStringLiteral("串口调试状态"));
@@ -1131,6 +1137,9 @@ void MainWindow::on_pushButton_connect_clicked()
     }
 
     epList = usbSkeleton->endPoints();
+    QStringList endpointLines;
+    for (int i = 0; i < 8; ++i)
+        ledit_eps[i].clear();
     for (int i = 0, cnt = epList.count(); i < cnt; i++) {
         ep = epList.at(i);
         epDisInfo.clear();
@@ -1182,6 +1191,7 @@ void MainWindow::on_pushButton_connect_clicked()
 
         if (i < 8)
             ledit_eps[i].setText(epDisInfo);
+        endpointLines.append(epDisInfo);
     }
 
     /* pushButton "start" enabled only when there is valible EndPoints */
@@ -1192,6 +1202,16 @@ void MainWindow::on_pushButton_connect_clicked()
 
         // add
         //ui->checkBoxInputData->setEnabled(true);
+        const QString endpointSummary = endpointLines.join(QLatin1Char('\n'));
+        qInfo().noquote() << "USB连接成功，描述符端点：\n" + endpointSummary;
+        statusBar()->showMessage(
+            QStringLiteral("USB已连接：%1个端点（4个OUT用于主机发送，4个IN用于图像接收）")
+                .arg(endpointLines.size()), 8000);
+        QMessageBox::information(
+            this, QStringLiteral("USB端点信息"),
+            QStringLiteral("设备接口描述符共有%1个Bulk端点：\n\n%2\n\n"
+                           "Start只从4个Bulk IN端点接收图像数据。")
+                .arg(endpointLines.size()).arg(endpointSummary));
     }
 }
 void MainWindow::transferRate()
@@ -1590,7 +1610,6 @@ void MainWindow::on_serialpB_clicked()
     if(!serial_bind_flag)
     {
         emit open_serial_signal(ui->serialCb->currentText());
-        QThread::msleep(10);
         if(!serial_bind_flag)
         {
             QMessageBox::critical(this,tr("Error"),"串口已被占用，请检查是否正确连接");
