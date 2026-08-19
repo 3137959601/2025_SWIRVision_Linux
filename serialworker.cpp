@@ -127,15 +127,38 @@ void SerialWorker::SerialPortInit(QString com_name)
     serialWorker->setDataBits(dataBits);
     serialWorker->setStopBits(stopBits);
     serialWorker->setParity(checkBits);
+    // 明确关闭软件/硬件流控。MacroSilicon转串口在Windows下由专有驱动
+    // 管理控制线；Linux使用pl2303兼容驱动时必须避免沿用未知流控状态。
+    serialWorker->setFlowControl(QSerialPort::NoFlowControl);
 
     connect(serialWorker,&QSerialPort::readyRead,this,&SerialWorker::SerialPortReadyRead_Slot);
+    connect(serialWorker, &QSerialPort::errorOccurred, this,
+            [this](QSerialPort::SerialPortError error) {
+        if (error == QSerialPort::NoError || !serialWorker)
+            return;
+        const QString message = QStringLiteral("串口运行错误（%1）：%2")
+                                    .arg(int(error))
+                                    .arg(serialWorker->errorString());
+        qWarning() << message;
+        emit serialStateChanged(false, message);
+    });
     connect(timer, &QTimer::timeout, this, &SerialWorker::timeUpdate);
     timer->setInterval(50);
 
     if(serialWorker->open(QIODevice::ReadWrite)==true)
     {
         serial_bind_flag = true;
-        const QString message = QStringLiteral("%1 已打开（115200 8N1）").arg(com_name);
+        // 与Windows串口驱动的常见打开行为对齐：显式声明终端就绪和请求发送，
+        // 不发送任何业务轮询指令。若底层驱动不支持，会把失败保留在日志中。
+        const bool dtrSet = serialWorker->setDataTerminalReady(true);
+        const bool rtsSet = serialWorker->setRequestToSend(true);
+        const auto pinout = serialWorker->pinoutSignals();
+        const QString message =
+            QStringLiteral("%1 已打开（115200 8N1，无流控；DTR=%2，RTS=%3，线路=0x%4）")
+                .arg(com_name)
+                .arg(dtrSet ? QStringLiteral("已置位") : QStringLiteral("失败"))
+                .arg(rtsSet ? QStringLiteral("已置位") : QStringLiteral("失败"))
+                .arg(quint32(pinout), 0, 16);
         qInfo() << message;
         emit serialStateChanged(true, message);
     }else{
