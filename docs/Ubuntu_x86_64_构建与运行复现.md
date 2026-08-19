@@ -409,7 +409,7 @@ python3 scripts/linux/probe_ms3020_serial.py --device /dev/ttyUSB0 --seconds 10
 python3 scripts/linux/probe_ms3020_serial.py --device /dev/ttyUSB0 --seconds 10 --assert-modem-lines
 ```
 
-两次探针均不发送任何业务命令。若仍为0字节，使用下面的`sudo`只读采集USB总线。执行后，立刻在GUI打开串口并等待约10秒；采集完成后把输出文件内容交给排查者：
+两次探针均不发送任何业务命令。若仍为0字节，使用下面的`sudo`只读采集USB总线。**先启动命令，再在15秒窗口内于GUI执行“关闭串口→打开串口”，并等待约10秒**；这样初始化控制传输和Bulk IN请求才会被记录。采集完成后把终端输出交给排查者：
 
 ```bash
 cd /home/d508/projects/2025_SWIRVision_Linux

@@ -45,7 +45,7 @@ device_number="$(printf '%03d' "$(cat "$device_path/devnum")")"
 bulk_in_filter="Bi:${bus}:${device_number}:3"
 
 echo "开始只读采集USB总线${bus}，持续${seconds}秒：$output"
-echo "采集期间在GUI中打开 ttyUSB0，等待遥测数据即可；不要发送业务指令。"
+echo "采集开始后，请在GUI中执行：关闭串口 -> 打开 ttyUSB0 -> 等待遥测数据；不要发送业务指令。"
 timeout --foreground "$seconds" cat "$monitor" > "$output" || {
     status=$?
     if [[ "$status" -ne 124 ]]; then
