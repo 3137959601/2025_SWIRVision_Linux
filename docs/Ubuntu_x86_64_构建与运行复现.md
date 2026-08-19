@@ -382,3 +382,27 @@ tail -n 30 build/x86_64-debug/speed_log.txt
 ```
 
 预期是出现`USB兼容发布不完整帧`并且GUI产生图像。若仍无图像，检查是否出现`已发布帧`增长：增长但无图说明问题在显示链路；不增长则继续检查实际最完整行数是否低于2040。以上操作不需要sudo。
+
+## 16. MacroSilicon串口无数据时的修复与诊断
+
+当前设备为`345f:3020`，Linux节点为`/dev/ttyUSB0`，由`pl2303`驱动绑定。GUI应先点击“刷新串口”，选择`ttyUSB0`，再点击“打开串口”；新版本会固定使用115200 8N1、无流控，并显式置位DTR/RTS。打开“调试 → 串口调试状态”，应能看到实际线路置位结果。
+
+普通用户可先执行只读探针；开始前请关闭GUI中的串口，避免两个进程同时打开设备：
+
+```bash
+cd /home/d508/projects/2025_SWIRVision_Linux
+python3 scripts/linux/probe_ms3020_serial.py --device /dev/ttyUSB0 --seconds 10
+python3 scripts/linux/probe_ms3020_serial.py --device /dev/ttyUSB0 --seconds 10 --assert-modem-lines
+```
+
+两次探针均不发送任何业务命令。若仍为0字节，使用下面的`sudo`只读采集USB总线。执行后，立刻在GUI打开串口并等待约10秒；采集完成后把输出文件内容交给排查者：
+
+```bash
+cd /home/d508/projects/2025_SWIRVision_Linux
+sudo bash scripts/linux/capture_ms3020_usbmon.sh 15 /tmp/ms3020-usbmon.log
+grep 'Bi:3:007:3' /tmp/ms3020-usbmon.log | tail -n 80
+```
+
+这里的`3:007`来自当前`lsusb`中的Bus 003、Device 007；设备重新插拔后必须先运行`lsusb -d 345f:3020`，再把命令中的设备号替换为新的三位数。`usbmon`只读取内核调试记录，不会发送串口数据、重置设备或替换驱动。
+
+判断规则：若`Bi`完成记录中的长度持续为0，数据没有从设备到达Linux USB层，继续检查模组输出、VMware透传或驱动初始化；若存在非零`Bi`数据而`/dev/ttyUSB0`仍读不到，问题就锁定在`pl2303` tty转换层，下一步再针对性测试新内核/新驱动，不能靠增加轮询指令掩盖。
