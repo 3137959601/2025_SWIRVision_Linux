@@ -63,13 +63,14 @@ grep 'not found' build/x86_64-release/ldd.log
 
 ## 4. 在虚拟机桌面启动
 
-在Ubuntu虚拟机的**桌面终端**中启动时，已经处于图形会话，不需要手动设置`DISPLAY`和`XAUTHORITY`；推荐先构建再启动：
+在Ubuntu虚拟机的**桌面终端**中启动时，已经处于图形会话，不需要手动设置`DISPLAY`和`XAUTHORITY`；推荐先构建再直接运行Debug产物：
 
 ```bash
 cd /home/d508/projects/2025_SWIRVision_Linux
 bash scripts/linux/build_x86_64.sh debug
-SWIR_OPENGL_MODE=software \
-  bash scripts/linux/run_x11_software.sh debug
+export LD_LIBRARY_PATH=/home/d508/.local/share/codex-envs/400w-qt-linux-v2/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+export QT_OPENGL=software LIBGL_ALWAYS_SOFTWARE=1
+./build/x86_64-debug/SWIRVision
 ```
 
 代码与产物位置：
@@ -84,7 +85,7 @@ Debug可执行文件：build/x86_64-debug/SWIRVision
 运行日志：build/x86_64-debug/hardware-gui.log
 ```
 
-如果已经构建完成，也可只执行后两行。使用SSH远程启动时才需要显式指定X11会话，方法如下。
+如果已经构建完成，也可只执行最后三行。`run_x11_software.sh`是SSH远程启动辅助脚本，才需要显式指定X11会话，方法如下。
 
 SSH中的`DISPLAY`为空是正常现象，不能直接假设显示号。先查询：
 
