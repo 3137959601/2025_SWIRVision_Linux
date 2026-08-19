@@ -28,6 +28,22 @@ if [[ ! -r "$monitor" ]]; then
     exit 3
 fi
 
+device_path=""
+for candidate in /sys/bus/usb/devices/*; do
+    [[ -r "$candidate/idVendor" && -r "$candidate/idProduct" ]] || continue
+    if [[ "$(cat "$candidate/idVendor")" == "345f" &&
+          "$(cat "$candidate/idProduct")" == "3020" ]]; then
+        device_path="$candidate"
+        break
+    fi
+done
+if [[ -z "$device_path" ]]; then
+    echo "未在sysfs发现345f:3020；请确认设备已透传到Ubuntu。" >&2
+    exit 4
+fi
+device_number="$(printf '%03d' "$(cat "$device_path/devnum")")"
+bulk_in_filter="Bi:${bus}:${device_number}:3"
+
 echo "开始只读采集USB总线${bus}，持续${seconds}秒：$output"
 echo "采集期间在GUI中打开 ttyUSB0，等待遥测数据即可；不要发送业务指令。"
 timeout --foreground "$seconds" cat "$monitor" > "$output" || {
@@ -37,5 +53,5 @@ timeout --foreground "$seconds" cat "$monitor" > "$output" || {
     fi
 }
 echo "采集完成，字节数：$(wc -c < "$output")"
-echo "设备为Bus ${bus} Device 007时，可用以下命令筛选Bulk IN 0x83："
-echo "  grep 'Bi:${bus}:007:3' '$output'"
+echo "自动识别的Bulk IN 0x83筛选条件：$bulk_in_filter"
+grep "$bulk_in_filter" "$output" | tail -n 80 || true

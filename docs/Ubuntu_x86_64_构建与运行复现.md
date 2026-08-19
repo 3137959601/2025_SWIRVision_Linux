@@ -401,9 +401,8 @@ python3 scripts/linux/probe_ms3020_serial.py --device /dev/ttyUSB0 --seconds 10 
 ```bash
 cd /home/d508/projects/2025_SWIRVision_Linux
 sudo bash scripts/linux/capture_ms3020_usbmon.sh 15 /tmp/ms3020-usbmon.log
-grep 'Bi:3:007:3' /tmp/ms3020-usbmon.log | tail -n 80
 ```
 
-这里的`3:007`来自当前`lsusb`中的Bus 003、Device 007；设备重新插拔后必须先运行`lsusb -d 345f:3020`，再把命令中的设备号替换为新的三位数。`usbmon`只读取内核调试记录，不会发送串口数据、重置设备或替换驱动。
+脚本会从sysfs自动识别当前`345f:3020`设备号，并在结束时直接输出Bulk IN `0x83`的最近80条记录；设备重新插拔后不需要手动修改筛选号。`usbmon`只读取内核调试记录，不会发送串口数据、重置设备或替换驱动。
 
 判断规则：若`Bi`完成记录中的长度持续为0，数据没有从设备到达Linux USB层，继续检查模组输出、VMware透传或驱动初始化；若存在非零`Bi`数据而`/dev/ttyUSB0`仍读不到，问题就锁定在`pl2303` tty转换层，下一步再针对性测试新内核/新驱动，不能靠增加轮询指令掩盖。
