@@ -388,6 +388,19 @@ tail -n 30 build/x86_64-debug/speed_log.txt
 
 当前设备为`345f:3020`，Linux节点为`/dev/ttyUSB0`，由`pl2303`驱动绑定。GUI应先点击“刷新串口”，选择`ttyUSB0`，再点击“打开串口”；新版本会固定使用115200 8N1、无流控，并显式置位DTR/RTS。打开“调试 → 串口调试状态”，应能看到实际线路置位结果。
 
+若GUI报`Permission denied`，先检查应用进程是否继承了`dialout`组。设备权限应类似`crw-rw---- root dialout /dev/ttyUSB0`。即使`id`已经显示当前用户属于`dialout`，**在加入该组之前启动的桌面会话和GUI仍不会自动获得新组权限**。不必更换串口设备，也不用sudo；关闭旧GUI后，在Ubuntu桌面终端执行以下命令，随后在新shell中启动程序：
+
+```bash
+newgrp dialout
+id
+cd /home/d508/projects/2025_SWIRVision_Linux
+export LD_LIBRARY_PATH=/home/d508/.local/share/codex-envs/400w-qt-linux-v2/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+export QT_OPENGL=software LIBGL_ALWAYS_SOFTWARE=1
+./build/x86_64-debug/SWIRVision
+```
+
+`id`输出必须含有`dialout`。要永久让桌面启动器也带上该组，注销Ubuntu桌面账户后重新登录即可；无需重装、重启或改设备权限。
+
 普通用户可先执行只读探针；开始前请关闭GUI中的串口，避免两个进程同时打开设备：
 
 ```bash
