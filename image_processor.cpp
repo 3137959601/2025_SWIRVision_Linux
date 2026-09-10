@@ -1,5 +1,7 @@
 #include "image_processor.h"
 
+#include <QDebug>
+
 #include <opencv2/imgcodecs.hpp>
 
 

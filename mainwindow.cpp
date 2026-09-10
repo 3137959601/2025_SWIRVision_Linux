@@ -751,9 +751,9 @@ void MainWindow::initImageProcessing() {
             return;
         const quint64 processedIndex = m_pendingOfflineFrameIndex;
         m_offlineFramePending = false;
+        emit offlineFrameProcessed(processedIndex);
         if (m_offlineReplay)
             m_offlineReplay->acknowledgeFrame();
-        emit offlineFrameProcessed(processedIndex);
     });
     // 标定窗口只读取完整原始帧做软件统计，不参与主显示链路，也不发送下位机指令。
     connect(imgProc, &ImageProcessor::updataimage,

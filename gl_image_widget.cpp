@@ -5,6 +5,8 @@
 #include <QMouseEvent>
 #include <QCursor>
 
+#include <cmath>
+
 #include "widget_image.h"  // 直接复用现有的共享 QImage 缓冲与互斥锁
 
 namespace {
@@ -453,8 +455,11 @@ void GLImageWidget::wheelEvent(QWheelEvent* e) {
     if (std::abs(newZoom - oldZoom) < 1e-9) return;
 
     // 1) 鼠标锚点（图像坐标）
-//    const QPointF m = e->position(); // 视口像素
-    const QPointF m = e->position() * devicePixelRatioF(); // 设备像素，与 viewW/viewH 对齐
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+    const QPointF m = e->position() * devicePixelRatioF();
+#else
+    const QPointF m = e->posF() * devicePixelRatioF();
+#endif
     const double imgX = offsetPx.x() + m.x() / oldZoom;
     const double imgY = offsetPx.y() + m.y() / oldZoom;
 
