@@ -43,7 +43,6 @@ HEADERS += \
     common/tih_usb_device.h \
     common/usb_frame_pipeline.h \
     common/usb_types.h \
-    common/winusb_supp.h \
     gl_image_widget.h \
     image_processor.h \
     linearstretchcalibrationdialog.h \

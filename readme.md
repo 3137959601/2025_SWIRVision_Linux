@@ -25,15 +25,16 @@
 | 文件或模块 | 职责 |
 | --- | --- |
 | `mainwindow.*`、`mainwindow.ui` | 主界面、图像控制、显示工具和调试窗口入口 |
-| `transfer_thread.*` | FX3数据接收、行头解析和多帧图像组装 |
-| `widget_image.*`、`gl_image_widget.*`、`drawthread.*` | 图像共享缓冲、OpenGL显示和绘制线程 |
+| `transfer_thread.cpp`、`transfer_thread_linux.cpp`、`transfer_thread_common.cpp` | Windows WinUSB与Linux libusb接收后端及公共传输逻辑 |
+| `common/usb_frame_pipeline.*` | 跨平台行包解析、残包处理和多帧图像组装 |
+| `widget_image.*`、`gl_image_widget.*` | 图像共享缓冲和OpenGL显示 |
+| `offline_replay_worker.*` | 16 bit RAW离线回放和逐帧背压 |
 | `serialworker.*` | 串口线程、字节流缓存和遥测帧分发 |
 | `uartprotocol.*` | 8字节命令生成、40字节长帧解析、校验及物理量换算 |
 | `telemetrydebugdialog.*` | 命令设置与状态回读合并的非模态串口调试窗口 |
 | `linearstretchcalibrationdialog.*` | 软件线性拉伸采样、统计、K/B计算和结果导出 |
 | `linearstretchmath.h` | 13 bit DN换算和线性拉伸参数计算 |
-| `image_processor_optimized.*` | 上位机软件两点、坏点等图像处理 |
-| `tests/` | 串口协议和线性拉伸数学单元测试 |
+| `image_processor.*` | 上位机软件两点、坏点等图像处理 |
 
 ## USB图像解析与多帧组装
 
@@ -176,13 +177,15 @@ FPGA直方图采用上下平台阈值映射，Qt调试窗口提供上下两个�
 
 工程文件为`SWIRVision.pro`，使用Qt Creator打开。当前已使用Qt 6.10、MSVC2022 Release构建验证；OpenCV目录仍以本机`SWIRVision.pro`配置为准。
 
-协议或算法修改后至少执行：
+当前Linux/RK3588复现入口位于`scripts/linux/`：
 
-1. 构建并运行`tests/uartprotocol_test.cpp`，检查命令校验、长帧拆包/粘包、脏数据和错误恢复。
-2. 构建并运行`tests/linearstretchmath_test.cpp`，检查13 bit换算、基础K/B和微调数学关系。
-3. 串口连接实机，确认40字节帧持续刷新、校验错误计数不增长、按钮状态与硬件回读一致。
-4. USB连接实机，确认2048行完整帧持续发布、16 bit帧号回绕后仍显示正常。
-5. 涉及FPGA协议字段时，同时核对`SWIR_400W3/readme.md`，不能只修改上位机一侧。
+1. Ubuntu使用`build_x86_64.sh`构建、`run_x11_software.sh`运行。
+2. RK3588使用`build_rk3588_native.sh`构建、`run_rk3588_x11.sh`运行。
+3. `generate_synthetic_raw.py`用于生成离线回放样例。
+4. 串口连接实机后检查40字节帧刷新、校验错误和硬件回读状态。
+5. USB连接实机后检查完整帧、丢行/丢帧、停止和重连。
+
+已完成的自动测试源码和测试脚本于2026-09-11从当前工作树精简；验证记录仍保存在Git提交`3331952`及`docs/迁移执行日志.md`中，需要时可从Git历史恢复。
 
 
 ## GitLab首次上传
@@ -212,15 +215,6 @@ fatal: Authentication failed for 'http://192.168.1.100:19131/D508/2025_SWIR400W.
 
 ## 环境注意事项
 
-每次下载工程到新电脑，需要重新修改.pro文件中的路径，否则无法找到相关文件
-使用MSVC2019/MSVC2022编译器编译，修改对应的路径
-下载opencv并配置环境，修改对应的路径
-![alt text](img/readme/.pro文件修改opencv路径.png)
+Windows使用MSVC2019/MSVC2022构建时，需要让`SWIRVision.pro`中的OpenCV目录与本机安装位置一致，并确保运行时可以找到对应的OpenCV DLL。
 
-vscode 修改markdown图片存放路径方法：
-https://www.cnblogs.com/xbotter/p/17528063.html
-
-安装完opencv,添加环境变量，修改.pro路径后，仍然出现以下错误：
-**成功解决 由于找不到opencv_world410d.dll,无法执行代码，重新安装程序可能会解决此问题**
-解决方法：
-https://blog.csdn.net/Feeryman_Lee/article/details/106114718
+Linux不使用Windows OpenCV路径，而是通过`pkg-config`查找OpenCV、OpenGL和libusb；具体构建和运行命令见`docs/Ubuntu_x86_64_构建与运行复现.md`与`docs/RK3588_Qt5_构建与离线回放.md`。

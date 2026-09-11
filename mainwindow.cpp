@@ -1377,7 +1377,6 @@ void MainWindow::on_pushButton_start_clicked()
     //thread2->start();
     //qDebug()<<"thread2 "<<QThread::currentThread();
     imgProc->start();
-    //qDebug()<<"drawthread "<<QThread::currentThread();
     for (int i = 4; i < CHANNELS_NUM; i++) {
         if (xferThread[i]) {
             xferThread[i]->start();
